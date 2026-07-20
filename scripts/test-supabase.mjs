@@ -17,7 +17,7 @@ const client = createClient(url, anonKey, {
 const { error: sessionError } = await client.auth.getSession();
 if (sessionError) throw sessionError;
 
-const response = await fetch(`${url}/rest/v1/`, {
+const response = await fetch(`${url}/auth/v1/health`, {
   headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
 });
 

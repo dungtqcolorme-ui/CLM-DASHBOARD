@@ -23,7 +23,7 @@ export async function pingSupabase() {
     throw new Error("Supabase environment variables are not configured");
   }
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/`, {
+  const response = await fetch(`${supabaseUrl}/auth/v1/health`, {
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${supabaseAnonKey}`,
@@ -32,7 +32,7 @@ export async function pingSupabase() {
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase REST health check failed (${response.status})`);
+    throw new Error(`Supabase Auth health check failed (${response.status})`);
   }
 
   return { ok: true, status: response.status };
