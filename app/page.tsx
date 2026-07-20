@@ -6,7 +6,7 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (7).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (8).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
@@ -423,7 +423,6 @@ export default function Home() {
         <div className="login-wrap">
           <p className="welcome-back">Chào mừng quay trở lại! <span>👋</span></p>
           <h1>Đăng nhập tài khoản</h1>
-          <p className="welcome">Truy cập CLM Dashboard để quản lý sự kiện, công việc và tài trợ một cách hiệu quả.</p>
 
           <form onSubmit={login}>
             <label htmlFor="email">Email</label>
