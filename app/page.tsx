@@ -6,7 +6,7 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (11).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (12).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";

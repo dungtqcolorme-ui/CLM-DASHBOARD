@@ -51,6 +51,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     const password = typeof body.password === "string" ? body.password : "";
+    if (password && !isAdmin) {
+      throw new ApiAuthError("Chỉ Admin được thay đổi mật khẩu tài khoản.", 403);
+    }
     if (password && password.length < 8) throw new ApiAuthError("Mật khẩu phải có ít nhất 8 ký tự.", 400);
 
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
