@@ -6,7 +6,7 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (8).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (9).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
@@ -104,6 +104,26 @@ function BrandLogo({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function DashboardLoading({ checking = false }: { checking?: boolean }) {
+  return (
+    <div className="dashboard-loading" role="status" aria-live="polite">
+      <div className="loading-corner loading-corner-top" aria-hidden="true" />
+      <div className="loading-corner loading-corner-bottom" aria-hidden="true" />
+      <div className="loading-content">
+        <div className="loading-orbit" aria-hidden="true">
+          <span className="loading-ring" />
+          <span className="loading-spinner" />
+          <BrandLogo />
+        </div>
+        <h1>{checking ? "Đang kiểm tra phiên đăng nhập" : "Đang tải dữ liệu"}</h1>
+        <p>Vui lòng chờ trong giây lát…</p>
+        <div className="loading-dots" aria-hidden="true"><i /><i /><i /></div>
+      </div>
+      <div className="loading-bars" aria-hidden="true"><i /><i /><i /><i /></div>
+    </div>
+  );
+}
+
 function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" | "task" | "heart" | "arrow" }) {
   const paths: Record<string, ReactNode> = {
     mail: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></>,
@@ -122,6 +142,8 @@ export default function Home() {
   const [dashboardUrl, setDashboardUrl] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardReady, setDashboardReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
@@ -182,10 +204,19 @@ export default function Home() {
   const enterDashboard = useCallback(async (role: AppRole) => {
     const currentProfile = profileRef.current;
     if (!currentProfile?.roles.includes(role)) throw new Error("Vai trò không thuộc tài khoản này.");
+    setDashboardReady(false);
+    setDashboardLoading(true);
     activeRoleRef.current = role;
     setActiveRole(role);
     setError("");
-    await openPrivateDashboard();
+    try {
+      await openPrivateDashboard();
+    } catch (dashboardError) {
+      activeRoleRef.current = "";
+      setActiveRole("");
+      setDashboardLoading(false);
+      throw dashboardError;
+    }
   }, [openPrivateDashboard]);
 
   const runDashboardRpc = useCallback(async (message: DashboardRpcMessage) => {
@@ -301,6 +332,8 @@ export default function Home() {
     activeRoleRef.current = "";
     setProfile(null);
     setActiveRole("");
+    setDashboardLoading(false);
+    setDashboardReady(false);
     setPassword("");
     setError("");
   }, []);
@@ -324,7 +357,11 @@ export default function Home() {
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT" && active) setDashboardUrl("");
+      if (event === "SIGNED_OUT" && active) {
+        setDashboardUrl("");
+        setDashboardLoading(false);
+        setDashboardReady(false);
+      }
     });
 
     const handleDashboardMessage = (event: MessageEvent) => {
@@ -332,6 +369,11 @@ export default function Home() {
       if (event.source !== dashboardFrame?.contentWindow) return;
       if (event.data?.type === "clm-dashboard-logout") {
         void logout();
+        return;
+      }
+      if (event.data?.type === "clm-dashboard-ready") {
+        setDashboardReady(true);
+        setDashboardLoading(false);
         return;
       }
       if (event.data?.type !== "clm-dashboard-rpc") return;
@@ -386,11 +428,16 @@ export default function Home() {
   }
 
   if (loading) {
-    return <main className="secure-loading"><BrandLogo compact /><span>Đang kiểm tra phiên đăng nhập…</span></main>;
+    return <DashboardLoading checking />;
   }
 
-  if (dashboardUrl) {
-    return <main className="secure-app"><iframe className="private-dashboard-frame" src={dashboardUrl} title="ColorME PR Sponsorship Dashboard" allow="clipboard-read; clipboard-write" /></main>;
+  if (dashboardUrl || dashboardLoading) {
+    return (
+      <main className="secure-app">
+        {dashboardUrl && <iframe className={`private-dashboard-frame ${dashboardReady ? "is-ready" : ""}`} src={dashboardUrl} title="ColorME PR Sponsorship Dashboard" allow="clipboard-read; clipboard-write" />}
+        {(!dashboardReady || dashboardLoading) && <DashboardLoading />}
+      </main>
+    );
   }
 
   if (profile && !activeRole) {
