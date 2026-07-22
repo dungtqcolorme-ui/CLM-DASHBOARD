@@ -18,7 +18,7 @@ function cleanRoles(value: unknown): AppRole[] | undefined {
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const identity = await getRequestIdentity(request);
-    requireAnyRole(identity.profile.roles, ["Admin", "PR Leader"]);
+    requireAnyRole([identity.activeRole], ["Admin", "PR Leader"]);
     const { id } = await context.params;
     const body = await request.json() as Record<string, unknown>;
     const admin = getSupabaseAdmin();
@@ -29,7 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     ]);
     if (targetProfileError || !targetProfile) throw new ApiAuthError("Không tìm thấy tài khoản.", 404);
     const targetRoles = (targetRolesRows ?? []).map((row) => row.role).filter(isAppRole);
-    const isAdmin = identity.profile.roles.includes("Admin");
+    const isAdmin = identity.activeRole === "Admin";
     if (!isAdmin && targetRoles.some((role) => role === "Admin" || role === "PR Leader")) {
       throw new ApiAuthError("PR Leader không được sửa tài khoản quản trị.", 403);
     }
@@ -94,7 +94,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const identity = await getRequestIdentity(request);
-    requireAnyRole(identity.profile.roles, ["Admin"]);
+    requireAnyRole([identity.activeRole], ["Admin"]);
     const { id } = await context.params;
     if (id === identity.user.id) throw new ApiAuthError("Không thể tự xóa tài khoản đang đăng nhập.", 409);
 

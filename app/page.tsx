@@ -6,11 +6,15 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (12).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (13).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
 const UPLOAD_BUCKET = "clm-dashboard-uploads";
+const PRIVATE_CACHE = "clm-dashboard-shell-v13";
+const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v13";
+const STATE_CACHE = "clm-dashboard-state-v1";
+const STATE_CACHE_URL = "/__clm_private/state-main-v1";
 
 type DashboardRpcMessage = {
   type: "clm-dashboard-rpc";
@@ -25,7 +29,12 @@ type DashboardRpcMessage = {
     | "list-users"
     | "create-user"
     | "update-user"
-    | "delete-user";
+    | "delete-user"
+    | "load-work-items"
+    | "save-work-item"
+    | "delete-work-item"
+    | "add-work-comment"
+    | "mark-notifications";
   payload?: Record<string, unknown>;
 };
 
@@ -78,7 +87,7 @@ async function readCompressedState(blob: Blob) {
   return new Response(stream).text();
 }
 
-async function authorizedApi<T>(path: string, init?: RequestInit) {
+async function authorizedApi<T>(path: string, init?: RequestInit, activeRole?: AppRole) {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
   if (!data.session) throw new Error("Phiên đăng nhập đã hết hạn.");
@@ -88,6 +97,7 @@ async function authorizedApi<T>(path: string, init?: RequestInit) {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${data.session.access_token}`,
+      ...(activeRole ? { "X-CLM-Active-Role": activeRole } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -113,7 +123,6 @@ function DashboardLoading({ checking = false }: { checking?: boolean }) {
         <div className="loading-orbit" aria-hidden="true">
           <span className="loading-ring" />
           <span className="loading-spinner" />
-          <BrandLogo />
         </div>
         <h1>{checking ? "Đang kiểm tra phiên đăng nhập" : "Đang tải dữ liệu"}</h1>
         <p>Vui lòng chờ trong giây lát…</p>
@@ -154,15 +163,20 @@ export default function Home() {
   const lastSavedStateRef = useRef("");
   const profileRef = useRef<AuthProfile | null>(null);
   const activeRoleRef = useRef<AppRole | "">("");
+  const dashboardBlobPromiseRef = useRef<Promise<Blob> | null>(null);
 
-  const loadCurrentProfile = useCallback(async () => {
+  const loadCurrentProfile = useCallback(async (knownUserId?: string) => {
     const supabase = getSupabaseClient();
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) throw new Error("Phiên đăng nhập không hợp lệ.");
+    let userId = knownUserId;
+    if (!userId) {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) throw new Error("Phiên đăng nhập không hợp lệ.");
+      userId = userData.user.id;
+    }
 
     const [{ data: profileRow, error: profileError }, { data: roleRows, error: roleError }] = await Promise.all([
-      supabase.from("profiles").select("id,email,full_name,status,created_at,updated_at").eq("id", userData.user.id).single<ProfileRow>(),
-      supabase.from("user_roles").select("role").eq("user_id", userData.user.id),
+      supabase.from("profiles").select("id,email,full_name,status,created_at,updated_at").eq("id", userId).single<ProfileRow>(),
+      supabase.from("user_roles").select("role").eq("user_id", userId),
     ]);
     if (profileError || !profileRow) throw new Error("Tài khoản chưa có hồ sơ hệ thống.");
     if (roleError) throw new Error("Không thể đọc quyền tài khoản.");
@@ -187,19 +201,45 @@ export default function Home() {
     return nextProfile;
   }, []);
 
-  const openPrivateDashboard = useCallback(async () => {
+  const fetchPrivateDashboard = useCallback(async (force = false) => {
+    if (!force && "caches" in window) {
+      const cache = await caches.open(PRIVATE_CACHE);
+      const cached = await cache.match(PRIVATE_CACHE_URL);
+      if (cached) return cached.blob();
+    }
     const supabase = getSupabaseClient();
     const { data, error: storageError } = await supabase.storage
       .from(PRIVATE_BUCKET)
       .download(PRIVATE_DASHBOARD);
     if (storageError || !data) throw new Error("Tài khoản chưa được cấp quyền xem dashboard.");
+    if ("caches" in window) {
+      const cache = await caches.open(PRIVATE_CACHE);
+      await cache.put(PRIVATE_CACHE_URL, new Response(data, {
+        headers: { "Content-Type": "text/html;charset=utf-8" },
+      }));
+    }
+    return data;
+  }, []);
+
+  const primePrivateDashboard = useCallback(() => {
+    if (!dashboardBlobPromiseRef.current) {
+      dashboardBlobPromiseRef.current = fetchPrivateDashboard().catch((cacheError) => {
+        dashboardBlobPromiseRef.current = null;
+        throw cacheError;
+      });
+    }
+    return dashboardBlobPromiseRef.current;
+  }, [fetchPrivateDashboard]);
+
+  const openPrivateDashboard = useCallback(async () => {
+    const data = await primePrivateDashboard();
 
     const objectUrl = URL.createObjectURL(new Blob([await data.arrayBuffer()], { type: "text/html;charset=utf-8" }));
     setDashboardUrl((currentUrl) => {
       if (currentUrl.startsWith("blob:")) URL.revokeObjectURL(currentUrl);
       return objectUrl;
     });
-  }, []);
+  }, [primePrivateDashboard]);
 
   const enterDashboard = useCallback(async (role: AppRole) => {
     const currentProfile = profileRef.current;
@@ -238,9 +278,10 @@ export default function Home() {
       };
     }
 
-    if (message.action === "list-users") return authorizedApi<{ users: AuthProfile[] }>("/api/admin/users");
+    const requestRole = activeRoleRef.current || undefined;
+    if (message.action === "list-users") return authorizedApi<{ users: AuthProfile[] }>("/api/admin/users", undefined, requestRole);
     if (message.action === "create-user") {
-      return authorizedApi("/api/admin/users", { method: "POST", body: JSON.stringify(payload) });
+      return authorizedApi("/api/admin/users", { method: "POST", body: JSON.stringify(payload) }, requestRole);
     }
     if (message.action === "update-user" || message.action === "delete-user") {
       const id = typeof payload.id === "string" ? payload.id : "";
@@ -250,11 +291,67 @@ export default function Home() {
       return authorizedApi(`/api/admin/users/${encodeURIComponent(id)}`, {
         method: message.action === "delete-user" ? "DELETE" : "PATCH",
         body: message.action === "delete-user" ? undefined : JSON.stringify(body),
-      });
+      }, requestRole);
+    }
+
+    if (message.action === "load-work-items") {
+      return authorizedApi("/api/work-items", undefined, requestRole);
+    }
+    if (message.action === "save-work-item") {
+      return authorizedApi("/api/work-items", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, requestRole);
+    }
+    if (message.action === "delete-work-item") {
+      const kind = typeof payload.kind === "string" ? payload.kind : "";
+      const id = typeof payload.id === "string" ? payload.id : "";
+      if (!kind || !id) throw new Error("Thiếu công việc cần xóa.");
+      return authorizedApi(`/api/work-items?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }, requestRole);
+    }
+    if (message.action === "add-work-comment") {
+      return authorizedApi("/api/work-items", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }, requestRole);
+    }
+    if (message.action === "mark-notifications") {
+      return authorizedApi("/api/work-items", {
+        method: "PATCH",
+        body: JSON.stringify({ ...payload, action: "mark-notifications" }),
+      }, requestRole);
     }
 
     if (message.action === "load-state") {
-      const { data: compressedData } = await supabase.storage.from(STATE_BUCKET).download(STATE_FILE);
+      const { data: meta } = await supabase
+        .from("dashboard_state_meta")
+        .select("updated_at")
+        .eq("id", "main")
+        .maybeSingle<{ updated_at: string }>();
+      const stateVersion = meta?.updated_at ?? "";
+      let compressedData: Blob | null = null;
+      if ("caches" in window) {
+        const cache = await caches.open(STATE_CACHE);
+        const cached = await cache.match(STATE_CACHE_URL);
+        if (cached && cached.headers.get("X-CLM-State-Version") === stateVersion) {
+          compressedData = await cached.blob();
+        }
+      }
+      if (!compressedData) {
+        const { data } = await supabase.storage.from(STATE_BUCKET).download(STATE_FILE);
+        compressedData = data;
+        if (compressedData && "caches" in window) {
+          const cache = await caches.open(STATE_CACHE);
+          await cache.put(STATE_CACHE_URL, new Response(compressedData, {
+            headers: {
+              "Content-Type": "application/gzip",
+              "X-CLM-State-Version": stateVersion,
+            },
+          }));
+        }
+      }
       let json = compressedData ? await readCompressedState(compressedData) : "";
       if (!json) {
         const { data: legacyData, error: legacyError } = await supabase.storage.from(STATE_BUCKET).download(LEGACY_STATE_FILE);
@@ -266,6 +363,9 @@ export default function Home() {
     }
 
     if (message.action === "save-state") {
+      if (activeRoleRef.current === "Viewer") {
+        return { saved: false, readonly: true };
+      }
       const state = payload.state;
       if (!state || typeof state !== "object") throw new Error("Dữ liệu dashboard không hợp lệ.");
       const json = safeDashboardJson(state);
@@ -287,6 +387,15 @@ export default function Home() {
           size_bytes: stateBlob.size,
         });
         if (metaError) throw metaError;
+        if ("caches" in window) {
+          const cache = await caches.open(STATE_CACHE);
+          await cache.put(STATE_CACHE_URL, new Response(stateBlob, {
+            headers: {
+              "Content-Type": "application/gzip",
+              "X-CLM-State-Version": new Date().toISOString(),
+            },
+          }));
+        }
         lastSavedStateRef.current = json;
         return { saved: true, size: stateBlob.size };
       });
@@ -336,6 +445,10 @@ export default function Home() {
     setDashboardReady(false);
     setPassword("");
     setError("");
+    dashboardBlobPromiseRef.current = null;
+    if ("caches" in window) {
+      await Promise.all([caches.delete(PRIVATE_CACHE), caches.delete(STATE_CACHE)]);
+    }
   }, []);
 
   useEffect(() => {
@@ -346,7 +459,8 @@ export default function Home() {
       if (!active) return;
       if (data.session) {
         try {
-          const currentProfile = await loadCurrentProfile();
+          const currentProfile = await loadCurrentProfile(data.session.user.id);
+          void primePrivateDashboard();
           if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
         } catch (sessionError) {
           await supabase.auth.signOut();
@@ -394,7 +508,7 @@ export default function Home() {
       authListener.subscription.unsubscribe();
       window.removeEventListener("message", handleDashboardMessage);
     };
-  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc]);
+  }, [enterDashboard, loadCurrentProfile, logout, primePrivateDashboard, runDashboardRpc]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -402,9 +516,12 @@ export default function Home() {
     setError("");
     try {
       const supabase = getSupabaseClient();
-      const { error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (loginError) throw new Error("Email hoặc mật khẩu không đúng.");
-      const currentProfile = await loadCurrentProfile();
+      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (loginError || !loginData.user) throw new Error("Email hoặc mật khẩu không đúng.");
+      const [currentProfile] = await Promise.all([
+        loadCurrentProfile(loginData.user.id),
+        primePrivateDashboard(),
+      ]);
       if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
     } catch (loginError) {
       await getSupabaseClient().auth.signOut();

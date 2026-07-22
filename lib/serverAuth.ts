@@ -61,11 +61,16 @@ export async function getRequestIdentity(request: Request) {
     throw new ApiAuthError(message, 403);
   }
   if (!roles.length) throw new ApiAuthError("Tài khoản chưa được phân quyền.", 403);
+  const requestedRole = request.headers.get("x-clm-active-role");
+  const activeRole = requestedRole && isAppRole(requestedRole) && roles.includes(requestedRole)
+    ? requestedRole
+    : roles[0];
 
   return {
     token,
     user: userData.user as User,
     profile: toAuthProfile(profile, roles),
+    activeRole,
   };
 }
 

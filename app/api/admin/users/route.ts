@@ -37,7 +37,7 @@ function cleanRoles(value: unknown): AppRole[] {
 export async function GET(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
-    requireAnyRole(identity.profile.roles, ["Admin", "PR Leader"]);
+    requireAnyRole([identity.activeRole], ["Admin", "PR Leader"]);
     const admin = getSupabaseAdmin();
 
     const [{ data: profiles, error: profilesError }, { data: roleRows, error: rolesError }] = await Promise.all([
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
   let createdUserId = "";
   try {
     const identity = await getRequestIdentity(request);
-    requireAnyRole(identity.profile.roles, ["Admin", "PR Leader"]);
+    requireAnyRole([identity.activeRole], ["Admin", "PR Leader"]);
 
     const body = await request.json() as Record<string, unknown>;
     const email = String(body.email ?? "").trim().toLowerCase();
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     if (!fullName) throw new ApiAuthError("Vui lòng nhập họ tên.", 400);
     if (!roles.length) throw new ApiAuthError("Vui lòng chọn ít nhất một vai trò.", 400);
     if (roles.some((role) => !APP_ROLES.includes(role))) throw new ApiAuthError("Vai trò không hợp lệ.", 400);
-    if (!identity.profile.roles.includes("Admin") && roles.some((role) => role === "Admin" || role === "PR Leader")) {
+    if (identity.activeRole !== "Admin" && roles.some((role) => role === "Admin" || role === "PR Leader")) {
       throw new ApiAuthError("Chỉ Admin được tạo tài khoản quản trị hoặc PR Leader.", 403);
     }
 
