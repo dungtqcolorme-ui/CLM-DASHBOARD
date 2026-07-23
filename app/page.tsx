@@ -6,13 +6,13 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (13).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (14).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
 const UPLOAD_BUCKET = "clm-dashboard-uploads";
-const PRIVATE_CACHE = "clm-dashboard-shell-v13";
-const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v13";
+const PRIVATE_CACHE = "clm-dashboard-shell-v14";
+const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v14";
 const STATE_CACHE = "clm-dashboard-state-v1";
 const STATE_CACHE_URL = "/__clm_private/state-main-v1";
 
@@ -34,7 +34,8 @@ type DashboardRpcMessage = {
     | "save-work-item"
     | "delete-work-item"
     | "add-work-comment"
-    | "mark-notifications";
+    | "mark-notifications"
+    | "delete-notifications";
   payload?: Record<string, unknown>;
 };
 
@@ -323,6 +324,12 @@ export default function Home() {
       return authorizedApi("/api/work-items", {
         method: "PATCH",
         body: JSON.stringify({ ...payload, action: "mark-notifications" }),
+      }, requestRole);
+    }
+    if (message.action === "delete-notifications") {
+      return authorizedApi("/api/work-items", {
+        method: "PATCH",
+        body: JSON.stringify({ ...payload, action: "delete-notifications" }),
       }, requestRole);
     }
 

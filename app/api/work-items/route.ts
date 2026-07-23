@@ -152,6 +152,7 @@ async function loadWorkItems(identity: Identity) {
     historyResult,
     profileResult,
     notificationResult,
+    dismissalResult,
   ] = await Promise.all([
     admin.from("tasks").select("*").order("updated_at", { ascending: false }),
     admin.from("task_collaborators").select("task_id,user_id"),
@@ -161,8 +162,9 @@ async function loadWorkItems(identity: Identity) {
     admin.from("work_history").select("*").order("created_at", { ascending: true }),
     admin.from("profiles").select("id,full_name,status"),
     admin.from("user_notifications").select("*").eq("recipient_id", identity.user.id).order("created_at", { ascending: false }).limit(100),
+    admin.from("notification_dismissals").select("notification_key").eq("user_id", identity.user.id).limit(500),
   ]);
-  const firstError = [taskResult, collaboratorResult, meetingResult, participantResult, commentResult, historyResult, profileResult, notificationResult]
+  const firstError = [taskResult, collaboratorResult, meetingResult, participantResult, commentResult, historyResult, profileResult, notificationResult, dismissalResult]
     .find((result) => result.error)?.error;
   if (firstError) throw firstError;
 
@@ -256,7 +258,12 @@ async function loadWorkItems(identity: Identity) {
     recordId: row.item_id,
     persisted: true,
   }));
-  return { tasks, meetings, notifications };
+  return {
+    tasks,
+    meetings,
+    notifications,
+    dismissedNotificationIds: (dismissalResult.data ?? []).map((row) => row.notification_key),
+  };
 }
 
 export async function GET(request: Request) {
@@ -387,6 +394,37 @@ export async function PATCH(request: Request) {
       const { error } = await query;
       if (error) throw error;
       return NextResponse.json({ updated: true });
+    }
+    if (body.action === "delete-notifications") {
+      const admin = getSupabaseAdmin();
+      const ids = stringList(body.ids).filter((id) => UUID_PATTERN.test(id));
+      const legacyIds = stringList(body.legacyIds).slice(0, 200);
+      const deleteAll = body.all === true;
+
+      if (deleteAll || ids.length) {
+        let query = admin
+          .from("user_notifications")
+          .delete()
+          .eq("recipient_id", identity.user.id);
+        if (!deleteAll) query = query.in("id", ids);
+        const { error } = await query;
+        if (error) throw error;
+      }
+
+      if (legacyIds.length) {
+        const { error } = await admin
+          .from("notification_dismissals")
+          .upsert(
+            legacyIds.map((notificationKey) => ({
+              user_id: identity.user.id,
+              notification_key: notificationKey,
+            })),
+            { onConflict: "user_id,notification_key", ignoreDuplicates: true },
+          );
+        if (error) throw error;
+      }
+
+      return NextResponse.json({ deleted: true });
     }
     ensureOperationalRole(identity);
     const kind = body.kind === "meeting" ? "meeting" : "task";
