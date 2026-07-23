@@ -133,7 +133,7 @@ function DashboardLoading({ checking = false }: { checking?: boolean }) {
   );
 }
 
-function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" | "task" | "heart" | "arrow" }) {
+function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" | "task" | "heart" | "arrow" | "chart" | "user" }) {
   const paths: Record<string, ReactNode> = {
     mail: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></>,
     lock: <><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
@@ -143,6 +143,8 @@ function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" 
     task: <><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3.5h6V6H9zM8 11l2 2 5-5M8 17h8"/></>,
     heart: <><path d="M20.8 5.8a5.5 5.5 0 0 0-7.8 0L12 6.8l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 22l7.8-7.4 1-1a5.5 5.5 0 0 0 0-7.8Z"/><path d="m9 13 2-2 2 2 2-2"/></>,
     arrow: <><path d="M5 12h14M14 7l5 5-5 5"/></>,
+    chart: <><path d="M5 20V10M12 20V4M19 20v-7"/><path d="M3 20h18"/></>,
+    user: <><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
@@ -583,16 +585,20 @@ export default function Home() {
   return (
     <main className="login-page">
       <section className="login-side">
-        <BrandLogo />
+        <div className="login-brand">
+          <BrandLogo />
+          <strong>PR Dashboard</strong>
+        </div>
+
         <div className="login-wrap">
-          <p className="welcome-back">Chào mừng quay trở lại! <span>👋</span></p>
-          <h1>Đăng nhập tài khoản</h1>
+          <h1>Đăng nhập</h1>
+          <p className="login-subtitle">Chào mừng bạn quay trở lại!</p>
 
           <form onSubmit={login}>
-            <label htmlFor="email">Email</label>
-            <div className="input-wrap"><Icon name="mail" /><input id="email" name="email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
-            <label htmlFor="password">Mật khẩu</label>
-            <div className="input-wrap"><Icon name="lock" /><input id="password" name="password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" placeholder="Nhập mật khẩu" value={password} onChange={(event) => setPassword(event.target.value)} required /><button type="button" onClick={() => setPasswordVisible(!passwordVisible)} aria-label={passwordVisible ? "Ẩn mật khẩu" : "Hiện mật khẩu"}><Icon name={passwordVisible ? "eyeOff" : "eye"} /></button></div>
+            <label className="sr-only" htmlFor="email">Email</label>
+            <div className="input-wrap"><Icon name="mail" /><input id="email" name="email" type="email" autoComplete="email" placeholder="Email của bạn" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
+            <label className="sr-only" htmlFor="password">Mật khẩu</label>
+            <div className="input-wrap"><Icon name="lock" /><input id="password" name="password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" placeholder="Mật khẩu" value={password} onChange={(event) => setPassword(event.target.value)} required /><button type="button" onClick={() => setPasswordVisible(!passwordVisible)} aria-label={passwordVisible ? "Ẩn mật khẩu" : "Hiện mật khẩu"}><Icon name={passwordVisible ? "eyeOff" : "eye"} /></button></div>
             <div className="form-meta"><label><input type="checkbox" defaultChecked />Ghi nhớ đăng nhập</label><button type="button" onClick={() => void forgotPassword()}>Quên mật khẩu?</button></div>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="submit-btn" type="submit" disabled={submitting}>{submitting ? "Đang đăng nhập…" : "Đăng nhập"}<Icon name="arrow" /></button>
@@ -601,17 +607,25 @@ export default function Home() {
         <footer>© 2026 ColorME. All rights reserved.</footer>
       </section>
 
-      <section className="visual-side">
-        <div className="visual-dots" aria-hidden="true">{Array.from({ length: 42 }).map((_, index) => <i key={index} />)}</div>
-        <div className="visual-copy"><p>CLM DASHBOARD</p><i /><h2>Quản lý sự kiện,<br />công việc &amp; tài trợ<br />trong <b>một nơi duy nhất</b></h2></div>
-        <div className="feature-list">
-          <article><span><Icon name="calendar" /></span><div><b>Quản lý sự kiện</b><small>Theo dõi toàn bộ sự kiện<br />từ kế hoạch đến kết quả.</small></div></article>
-          <article><span><Icon name="task" /></span><div><b>Công việc &amp; tiến độ</b><small>Giao việc, theo dõi tiến độ<br />và tối ưu hiệu suất.</small></div></article>
-          <article><span><Icon name="heart" /></span><div><b>Quản lý tài trợ</b><small>Quản lý đối tác, hợp đồng<br />và quyền lợi tài trợ.</small></div></article>
+      <section className="visual-side" aria-label="Giới thiệu PR Dashboard">
+        <div className="visual-copy">
+          <span className="visual-mark"><Icon name="chart" /></span>
+          <h2><b>Quản lý sự kiện,<br />công việc &amp; tài trợ</b><br /><span>trong một nơi duy nhất</span></h2>
         </div>
+
         <div className="dashboard-art" aria-hidden="true">
-          <div className="art-window"><div className="art-top"><BrandLogo compact /></div><div className="art-body"><div className="art-menu"><i/><i/><i/><i/></div><div className="art-chart"><span/><span/><span/></div><div className="art-ring"/></div></div>
-          <div className="art-float user"><i/><i/></div><div className="art-float bars"><i/><i/><i/></div><div className="art-float pie"><i/></div>
+          <div className="art-orbit art-orbit-one" />
+          <div className="art-orbit art-orbit-two" />
+          <div className="art-window">
+            <div className="art-top"><BrandLogo compact /></div>
+            <div className="art-body">
+              <div className="art-menu"><i /><i /><i /><i /></div>
+              <div className="art-chart"><span /><span /><span /></div>
+              <div className="art-ring" />
+            </div>
+          </div>
+          <span className="art-float calendar"><Icon name="calendar" /></span>
+          <span className="art-float user"><Icon name="user" /></span>
         </div>
       </section>
     </main>
