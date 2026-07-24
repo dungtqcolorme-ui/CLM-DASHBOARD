@@ -40,11 +40,18 @@ export async function GET(request: Request) {
     requireAnyRole([identity.activeRole], ["Admin", "PR Leader"]);
     const admin = getSupabaseAdmin();
 
-    const [{ data: profiles, error: profilesError }, { data: roleRows, error: rolesError }] = await Promise.all([
+    const [
+      { data: profiles, error: profilesError },
+      { data: roleRows, error: rolesError },
+      { data: authUsers, error: authUsersError },
+    ] = await Promise.all([
       admin.from("profiles").select("id,email,full_name,status,created_at,updated_at").order("created_at"),
       admin.from("user_roles").select("user_id,role"),
+      admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     ]);
-    if (profilesError || rolesError) throw profilesError ?? rolesError;
+    if (profilesError || rolesError || authUsersError) {
+      throw profilesError ?? rolesError ?? authUsersError;
+    }
 
     const rolesByUser = new Map<string, AppRole[]>();
     for (const row of roleRows ?? []) {
@@ -54,9 +61,13 @@ export async function GET(request: Request) {
       rolesByUser.set(row.user_id, roles);
     }
 
-    const users = (profiles as ProfileRow[] ?? []).map((profile) =>
-      toAuthProfile(profile, rolesByUser.get(profile.id) ?? []),
+    const lastSignInByUser = new Map(
+      (authUsers?.users ?? []).map((user) => [user.id, user.last_sign_in_at ?? null]),
     );
+    const users = (profiles as ProfileRow[] ?? []).map((profile) => ({
+      ...toAuthProfile(profile, rolesByUser.get(profile.id) ?? []),
+      lastSignInAt: lastSignInByUser.get(profile.id) ?? null,
+    }));
     return NextResponse.json({ users });
   } catch (error) {
     return apiError(error, "Không thể tải danh sách tài khoản.");

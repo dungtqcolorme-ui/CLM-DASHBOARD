@@ -16,6 +16,7 @@ export type AuthProfile = {
   roles: AppRole[];
   createdAt: string;
   updatedAt: string;
+  lastSignInAt?: string | null;
 };
 
 export function isAppRole(value: unknown): value is AppRole {
