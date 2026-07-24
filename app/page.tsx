@@ -6,13 +6,13 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (22).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (23).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
 const UPLOAD_BUCKET = "clm-dashboard-uploads";
-const PRIVATE_CACHE = "clm-dashboard-shell-v22";
-const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v22";
+const PRIVATE_CACHE = "clm-dashboard-shell-v23";
+const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v23";
 const STATE_CACHE = "clm-dashboard-state-v1";
 const STATE_CACHE_URL = "/__clm_private/state-main-v1";
 
@@ -35,7 +35,9 @@ type DashboardRpcMessage = {
     | "delete-work-item"
     | "add-work-comment"
     | "mark-notifications"
-    | "delete-notifications";
+    | "delete-notifications"
+    | "get-google-calendar-status"
+    | "connect-google-calendar";
   payload?: Record<string, unknown>;
 };
 
@@ -330,6 +332,15 @@ export default function Home() {
       return authorizedApi("/api/work-items", {
         method: "PATCH",
         body: JSON.stringify({ ...payload, action: "delete-notifications" }),
+      }, requestRole);
+    }
+    if (message.action === "get-google-calendar-status") {
+      return authorizedApi("/api/google/calendar", undefined, requestRole);
+    }
+    if (message.action === "connect-google-calendar") {
+      return authorizedApi("/api/google/calendar/oauth/start", {
+        method: "POST",
+        body: JSON.stringify({}),
       }, requestRole);
     }
 

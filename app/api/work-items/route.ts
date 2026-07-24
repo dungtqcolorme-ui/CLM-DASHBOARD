@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ApiAuthError, getRequestIdentity } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { removeGoogleCalendarMeeting, syncGoogleCalendarMeeting } from "@/lib/googleCalendar";
 
 type JsonRecord = Record<string, unknown>;
 type Identity = Awaited<ReturnType<typeof getRequestIdentity>>;
@@ -55,7 +56,11 @@ function isoDate(value: unknown) {
 
 function isoDateTime(value: unknown, label: string) {
   const raw = cleanText(value, 40);
-  const date = new Date(raw);
+  const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(raw);
+  const normalized = localDateTime
+    ? `${raw}${raw.length === 16 ? ":00" : ""}+07:00`
+    : raw;
+  const date = new Date(normalized);
   if (!raw || Number.isNaN(date.getTime())) throw new ApiAuthError(`${label} không hợp lệ.`, 400);
   return date.toISOString();
 }
@@ -74,10 +79,11 @@ async function assertActiveProfiles(ids: string[]) {
     throw new ApiAuthError("Danh sách nhân sự không hợp lệ.", 400);
   }
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin.from("profiles").select("id,status").in("id", unique);
+  const { data, error } = await admin.from("profiles").select("id,status,email").in("id", unique);
   if (error) throw error;
   const active = new Set((data ?? []).filter((row) => row.status === "active").map((row) => row.id));
   if (unique.some((id) => !active.has(id))) throw new ApiAuthError("Có nhân sự không tồn tại hoặc đã bị khóa.", 400);
+  return data ?? [];
 }
 
 async function canModify(identity: Identity, kind: "task" | "meeting", id: string) {
@@ -232,9 +238,12 @@ async function loadWorkItems(identity: Identity) {
       participantIds,
       attendees: participantIds.map((id) => names.get(id) ?? id),
       notes: row.notes,
-      actions: row.action_items,
+      actions: "",
       taskId: row.related_task_id,
       link: row.meeting_link,
+      googleEventId: row.google_event_id,
+      googleCalendarLink: row.google_calendar_link,
+      googleSyncStatus: row.google_sync_status,
       status: row.status,
       createdBy: row.created_by,
       createdAt: row.created_at,
@@ -295,8 +304,8 @@ export async function POST(request: Request) {
       const participantIds = stringList(record.participantIds);
       if (!title) throw new ApiAuthError("Vui lòng nhập tiêu đề cuộc họp.", 400);
       if (!participantIds.length) throw new ApiAuthError("Cuộc họp phải có ít nhất một người tham gia.", 400);
-      await assertActiveProfiles(participantIds);
-      const { data: existing } = await admin.from("meetings").select("created_by,version").eq("id", id).maybeSingle();
+      const participantProfiles = await assertActiveProfiles(participantIds);
+      const { data: existing } = await admin.from("meetings").select("created_by,version,google_event_id").eq("id", id).maybeSingle();
       if (existing && Number(record.version) && Number(record.version) !== existing.version) {
         throw new ApiAuthError("Cuộc họp vừa được người khác cập nhật. Hãy tải lại trước khi lưu.", 409);
       }
@@ -307,7 +316,7 @@ export async function POST(request: Request) {
         starts_at: start,
         ends_at: end,
         notes: cleanText(record.notes, 20_000),
-        action_items: cleanText(record.actions, 20_000),
+        action_items: "",
         meeting_link: cleanText(record.link, 2_000),
         related_task_id: cleanText(record.taskId, 120),
         status,
@@ -322,7 +331,57 @@ export async function POST(request: Request) {
       if (participantError) throw participantError;
       await insertHistory("meeting", id, identity, existing ? "Cập nhật cuộc họp" : "Tạo cuộc họp");
       await notifyRecipients(identity, "meeting", id, existing ? "Cuộc họp được cập nhật" : "Cuộc họp mới", `“${title}” đã được ${existing ? "cập nhật" : "tạo"}.`, participantIds);
-      return NextResponse.json({ saved: true, id, version: saved.version, updatedAt: saved.updated_at });
+      let googleSyncStatus = "not_connected";
+      let googleEventId = existing?.google_event_id ?? "";
+      let meetUrl = cleanText(record.link, 2_000);
+      let googleCalendarLink = "";
+      let finalVersion = saved.version;
+      let finalUpdatedAt = saved.updated_at;
+      try {
+        const calendar = await syncGoogleCalendarMeeting({
+          id,
+          title,
+          notes: cleanText(record.notes, 20_000),
+          start,
+          end: end ?? new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString(),
+          attendeeEmails: participantProfiles.map((profile) => profile.email).filter(Boolean),
+        });
+        googleSyncStatus = calendar.status;
+        googleEventId = calendar.eventId || googleEventId;
+        meetUrl = calendar.meetUrl || meetUrl;
+        googleCalendarLink = calendar.calendarLink;
+        const { data: syncedRow, error: syncUpdateError } = await admin.from("meetings").update({
+          meeting_link: meetUrl,
+          google_event_id: googleEventId,
+          google_calendar_link: googleCalendarLink,
+          google_sync_status: googleSyncStatus,
+          google_sync_error: "",
+          google_synced_at: googleSyncStatus === "synced" ? new Date().toISOString() : null,
+        }).eq("id", id).select("version,updated_at").single();
+        if (syncUpdateError) throw syncUpdateError;
+        finalVersion = syncedRow.version;
+        finalUpdatedAt = syncedRow.updated_at;
+      } catch (calendarError) {
+        googleSyncStatus = "error";
+        const { data: failedSyncRow } = await admin.from("meetings").update({
+          google_sync_status: googleSyncStatus,
+          google_sync_error: calendarError instanceof Error ? calendarError.message.slice(0, 2_000) : "Lỗi Google Calendar",
+        }).eq("id", id).select("version,updated_at").single();
+        if (failedSyncRow) {
+          finalVersion = failedSyncRow.version;
+          finalUpdatedAt = failedSyncRow.updated_at;
+        }
+      }
+      return NextResponse.json({
+        saved: true,
+        id,
+        version: finalVersion,
+        updatedAt: finalUpdatedAt,
+        googleSyncStatus,
+        googleEventId,
+        meetUrl,
+        googleCalendarLink,
+      });
     }
 
     const title = cleanText(record.ten ?? record.title, 240);
@@ -471,6 +530,14 @@ export async function DELETE(request: Request) {
     const id = validItemId(url.searchParams.get("id"));
     if (!(await canModify(identity, kind, id))) throw new ApiAuthError("Bạn không có quyền xóa công việc này.", 403);
     const table = kind === "meeting" ? "meetings" : "tasks";
+    if (kind === "meeting") {
+      const { data: meeting } = await getSupabaseAdmin()
+        .from("meetings")
+        .select("google_event_id")
+        .eq("id", id)
+        .maybeSingle();
+      if (meeting?.google_event_id) await removeGoogleCalendarMeeting(meeting.google_event_id);
+    }
     const { error } = await getSupabaseAdmin().from(table).delete().eq("id", id);
     if (error) throw error;
     return NextResponse.json({ deleted: true, id });
