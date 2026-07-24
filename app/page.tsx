@@ -11,8 +11,8 @@ const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
 const UPLOAD_BUCKET = "clm-dashboard-uploads";
-const PRIVATE_CACHE = "clm-dashboard-shell-v17";
-const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v17";
+const PRIVATE_CACHE = "clm-dashboard-shell-v19";
+const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v19";
 const STATE_CACHE = "clm-dashboard-state-v1";
 const STATE_CACHE_URL = "/__clm_private/state-main-v1";
 
