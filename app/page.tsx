@@ -6,13 +6,13 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (26).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (27).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
 const UPLOAD_BUCKET = "clm-dashboard-uploads";
-const PRIVATE_CACHE = "clm-dashboard-shell-v26";
-const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v26";
+const PRIVATE_CACHE = "clm-dashboard-shell-v27";
+const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v27";
 const STATE_CACHE = "clm-dashboard-state-v1";
 const STATE_CACHE_URL = "/__clm_private/state-main-v1";
 
