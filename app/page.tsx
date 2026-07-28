@@ -6,15 +6,19 @@ import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (27).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (28).html";
 const STATE_BUCKET = "clm-dashboard-state";
 const STATE_FILE = "main.json.gz";
 const LEGACY_STATE_FILE = "main.json";
 const UPLOAD_BUCKET = "clm-dashboard-uploads";
-const PRIVATE_CACHE = "clm-dashboard-shell-v27";
-const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v27";
+const PRIVATE_CACHE = "clm-dashboard-shell-v28";
+const PRIVATE_CACHE_URL = "/__clm_private/dashboard-v28";
 const STATE_CACHE = "clm-dashboard-state-v1";
 const STATE_CACHE_URL = "/__clm_private/state-main-v1";
+const CACHE_TIMEOUT_MS = 3_000;
+const DASHBOARD_DOWNLOAD_TIMEOUT_MS = 25_000;
+const DASHBOARD_BOOT_TIMEOUT_MS = 40_000;
+const STATE_DOWNLOAD_TIMEOUT_MS = 30_000;
 
 type DashboardRpcMessage = {
   type: "clm-dashboard-rpc";
@@ -49,6 +53,20 @@ type ProfileRow = {
   created_at: string;
   updated_at: string;
 };
+
+async function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer = 0;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<T>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
+}
 
 function safeStorageName(name: string) {
   const dot = name.lastIndexOf(".");
@@ -117,19 +135,38 @@ function BrandLogo({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function DashboardLoading({ checking = false }: { checking?: boolean }) {
+function DashboardLoading({
+  checking = false,
+  error = "",
+  onRetry,
+}: {
+  checking?: boolean;
+  error?: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="dashboard-loading" role="status" aria-live="polite">
       <div className="loading-corner loading-corner-top" aria-hidden="true" />
       <div className="loading-corner loading-corner-bottom" aria-hidden="true" />
       <div className="loading-content">
-        <div className="loading-orbit" aria-hidden="true">
-          <span className="loading-ring" />
-          <span className="loading-spinner" />
-        </div>
-        <h1>{checking ? "Đang kiểm tra phiên đăng nhập" : "Đang tải dữ liệu"}</h1>
-        <p>Vui lòng chờ trong giây lát…</p>
-        <div className="loading-dots" aria-hidden="true"><i /><i /><i /></div>
+        {error ? (
+          <>
+            <div className="loading-error-mark" aria-hidden="true">!</div>
+            <h1>Không thể tải dashboard</h1>
+            <p className="loading-error-copy">{error}</p>
+            {onRetry && <button className="loading-retry" type="button" onClick={onRetry}>Thử lại</button>}
+          </>
+        ) : (
+          <>
+            <div className="loading-orbit" aria-hidden="true">
+              <span className="loading-ring" />
+              <span className="loading-spinner" />
+            </div>
+            <h1>{checking ? "Đang kiểm tra phiên đăng nhập" : "Đang tải dữ liệu"}</h1>
+            <p>Vui lòng chờ trong giây lát…</p>
+            <div className="loading-dots" aria-hidden="true"><i /><i /><i /></div>
+          </>
+        )}
       </div>
       <div className="loading-bars" aria-hidden="true"><i /><i /><i /><i /></div>
     </div>
@@ -153,11 +190,13 @@ function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" 
 }
 
 export default function Home() {
-  const [dashboardUrl, setDashboardUrl] = useState("");
+  const [dashboardHtml, setDashboardHtml] = useState("");
+  const [dashboardFrameKey, setDashboardFrameKey] = useState(0);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardReady, setDashboardReady] = useState(false);
+  const [dashboardBootError, setDashboardBootError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
@@ -168,7 +207,7 @@ export default function Home() {
   const lastSavedStateRef = useRef("");
   const profileRef = useRef<AuthProfile | null>(null);
   const activeRoleRef = useRef<AppRole | "">("");
-  const dashboardBlobPromiseRef = useRef<Promise<Blob> | null>(null);
+  const dashboardShellPromiseRef = useRef<Promise<string> | null>(null);
 
   const loadCurrentProfile = useCallback(async (knownUserId?: string) => {
     const supabase = getSupabaseClient();
@@ -208,42 +247,53 @@ export default function Home() {
 
   const fetchPrivateDashboard = useCallback(async (force = false) => {
     if (!force && "caches" in window) {
-      const cache = await caches.open(PRIVATE_CACHE);
-      const cached = await cache.match(PRIVATE_CACHE_URL);
-      if (cached) return cached.blob();
+      try {
+        const cached = await withTimeout(
+          caches.open(PRIVATE_CACHE).then((cache) => cache.match(PRIVATE_CACHE_URL)),
+          CACHE_TIMEOUT_MS,
+          "Bộ nhớ đệm phản hồi quá chậm.",
+        );
+        if (cached) {
+          return await withTimeout(cached.text(), CACHE_TIMEOUT_MS, "Không thể đọc dashboard từ bộ nhớ đệm.");
+        }
+      } catch {
+        // Cache API có thể bị chặn hoặc treo trong chế độ duyệt riêng tư trên iOS.
+      }
     }
     const supabase = getSupabaseClient();
-    const { data, error: storageError } = await supabase.storage
-      .from(PRIVATE_BUCKET)
-      .download(PRIVATE_DASHBOARD);
+    const { data, error: storageError } = await withTimeout(
+      supabase.storage.from(PRIVATE_BUCKET).download(PRIVATE_DASHBOARD),
+      DASHBOARD_DOWNLOAD_TIMEOUT_MS,
+      "Kết nối tải dashboard quá thời gian. Vui lòng kiểm tra mạng và thử lại.",
+    );
     if (storageError || !data) throw new Error("Tài khoản chưa được cấp quyền xem dashboard.");
     if ("caches" in window) {
-      const cache = await caches.open(PRIVATE_CACHE);
-      await cache.put(PRIVATE_CACHE_URL, new Response(data, {
-        headers: { "Content-Type": "text/html;charset=utf-8" },
-      }));
+      void withTimeout(
+        caches.open(PRIVATE_CACHE).then((cache) => cache.put(PRIVATE_CACHE_URL, new Response(data, {
+          headers: { "Content-Type": "text/html;charset=utf-8" },
+        }))),
+        CACHE_TIMEOUT_MS,
+        "Không thể ghi bộ nhớ đệm.",
+      ).catch(() => undefined);
     }
-    return data;
+    return data.text();
   }, []);
 
-  const primePrivateDashboard = useCallback(() => {
-    if (!dashboardBlobPromiseRef.current) {
-      dashboardBlobPromiseRef.current = fetchPrivateDashboard().catch((cacheError) => {
-        dashboardBlobPromiseRef.current = null;
+  const primePrivateDashboard = useCallback((force = false) => {
+    if (force) dashboardShellPromiseRef.current = null;
+    if (!dashboardShellPromiseRef.current) {
+      dashboardShellPromiseRef.current = fetchPrivateDashboard(force).catch((cacheError) => {
+        dashboardShellPromiseRef.current = null;
         throw cacheError;
       });
     }
-    return dashboardBlobPromiseRef.current;
+    return dashboardShellPromiseRef.current;
   }, [fetchPrivateDashboard]);
 
-  const openPrivateDashboard = useCallback(async () => {
-    const data = await primePrivateDashboard();
-
-    const objectUrl = URL.createObjectURL(new Blob([await data.arrayBuffer()], { type: "text/html;charset=utf-8" }));
-    setDashboardUrl((currentUrl) => {
-      if (currentUrl.startsWith("blob:")) URL.revokeObjectURL(currentUrl);
-      return objectUrl;
-    });
+  const openPrivateDashboard = useCallback(async (force = false) => {
+    const html = await primePrivateDashboard(force);
+    setDashboardHtml(html);
+    setDashboardFrameKey((currentKey) => currentKey + 1);
   }, [primePrivateDashboard]);
 
   const enterDashboard = useCallback(async (role: AppRole) => {
@@ -251,16 +301,28 @@ export default function Home() {
     if (!currentProfile?.roles.includes(role)) throw new Error("Vai trò không thuộc tài khoản này.");
     setDashboardReady(false);
     setDashboardLoading(true);
+    setDashboardBootError("");
     activeRoleRef.current = role;
     setActiveRole(role);
     setError("");
     try {
       await openPrivateDashboard();
     } catch (dashboardError) {
-      activeRoleRef.current = "";
-      setActiveRole("");
       setDashboardLoading(false);
-      throw dashboardError;
+      setDashboardBootError(dashboardError instanceof Error ? dashboardError.message : "Không thể mở dashboard.");
+    }
+  }, [openPrivateDashboard]);
+
+  const retryDashboard = useCallback(async () => {
+    if (!activeRoleRef.current) return;
+    setDashboardReady(false);
+    setDashboardLoading(true);
+    setDashboardBootError("");
+    try {
+      await openPrivateDashboard(true);
+    } catch (retryError) {
+      setDashboardLoading(false);
+      setDashboardBootError(retryError instanceof Error ? retryError.message : "Không thể mở dashboard.");
     }
   }, [openPrivateDashboard]);
 
@@ -345,31 +407,59 @@ export default function Home() {
     }
 
     if (message.action === "load-state") {
-      const { data: meta } = await supabase
-        .from("dashboard_state_meta")
-        .select("updated_at")
-        .eq("id", "main")
-        .maybeSingle<{ updated_at: string }>();
-      const stateVersion = meta?.updated_at ?? "";
+      let stateVersion = "";
+      try {
+        const { data: meta } = await withTimeout(
+          supabase
+            .from("dashboard_state_meta")
+            .select("updated_at")
+            .eq("id", "main")
+            .maybeSingle<{ updated_at: string }>(),
+          8_000,
+          "Không thể kiểm tra phiên bản dữ liệu.",
+        );
+        stateVersion = meta?.updated_at ?? "";
+      } catch {
+        // Metadata chỉ phục vụ kiểm tra cache; vẫn có thể tải file trạng thái trực tiếp.
+      }
       let compressedData: Blob | null = null;
       if ("caches" in window) {
-        const cache = await caches.open(STATE_CACHE);
-        const cached = await cache.match(STATE_CACHE_URL);
-        if (cached && cached.headers.get("X-CLM-State-Version") === stateVersion) {
-          compressedData = await cached.blob();
+        try {
+          const cached = await withTimeout(
+            caches.open(STATE_CACHE).then((cache) => cache.match(STATE_CACHE_URL)),
+            CACHE_TIMEOUT_MS,
+            "Bộ nhớ đệm dữ liệu phản hồi quá chậm.",
+          );
+          if (cached && cached.headers.get("X-CLM-State-Version") === stateVersion) {
+            compressedData = await withTimeout(
+              cached.blob(),
+              CACHE_TIMEOUT_MS,
+              "Không thể đọc dữ liệu từ bộ nhớ đệm.",
+            );
+          }
+        } catch {
+          // Tiếp tục tải trực tiếp từ Supabase khi cache không khả dụng.
         }
       }
       if (!compressedData) {
-        const { data } = await supabase.storage.from(STATE_BUCKET).download(STATE_FILE);
+        const { data, error: stateError } = await withTimeout(
+          supabase.storage.from(STATE_BUCKET).download(STATE_FILE),
+          STATE_DOWNLOAD_TIMEOUT_MS,
+          "Tải dữ liệu dashboard quá thời gian. Vui lòng thử lại.",
+        );
+        if (stateError) throw stateError;
         compressedData = data;
         if (compressedData && "caches" in window) {
-          const cache = await caches.open(STATE_CACHE);
-          await cache.put(STATE_CACHE_URL, new Response(compressedData, {
-            headers: {
-              "Content-Type": "application/gzip",
-              "X-CLM-State-Version": stateVersion,
-            },
-          }));
+          void withTimeout(
+            caches.open(STATE_CACHE).then((cache) => cache.put(STATE_CACHE_URL, new Response(compressedData, {
+              headers: {
+                "Content-Type": "application/gzip",
+                "X-CLM-State-Version": stateVersion,
+              },
+            }))),
+            CACHE_TIMEOUT_MS,
+            "Không thể ghi bộ nhớ đệm dữ liệu.",
+          ).catch(() => undefined);
         }
       }
       let json = compressedData ? await readCompressedState(compressedData) : "";
@@ -453,48 +543,66 @@ export default function Home() {
   const logout = useCallback(async () => {
     const supabase = getSupabaseClient();
     await supabase.auth.signOut();
-    setDashboardUrl((currentUrl) => {
-      if (currentUrl.startsWith("blob:")) URL.revokeObjectURL(currentUrl);
-      return "";
-    });
+    setDashboardHtml("");
     profileRef.current = null;
     activeRoleRef.current = "";
     setProfile(null);
     setActiveRole("");
     setDashboardLoading(false);
     setDashboardReady(false);
+    setDashboardBootError("");
     setPassword("");
     setError("");
-    dashboardBlobPromiseRef.current = null;
+    dashboardShellPromiseRef.current = null;
     if ("caches" in window) {
-      await Promise.all([caches.delete(PRIVATE_CACHE), caches.delete(STATE_CACHE)]);
+      void withTimeout(
+        Promise.all([caches.delete(PRIVATE_CACHE), caches.delete(STATE_CACHE)]),
+        CACHE_TIMEOUT_MS,
+        "Không thể xóa bộ nhớ đệm.",
+      ).catch(() => undefined);
     }
   }, []);
+
+  useEffect(() => {
+    if (!dashboardLoading || dashboardReady || dashboardBootError) return;
+    const timer = window.setTimeout(() => {
+      setDashboardLoading(false);
+      setDashboardBootError("Kết nối dữ liệu mất quá nhiều thời gian. Hãy kiểm tra mạng rồi thử lại.");
+    }, DASHBOARD_BOOT_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [dashboardBootError, dashboardLoading, dashboardReady, dashboardFrameKey]);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
     let active = true;
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active) return;
-      if (data.session) {
-        try {
-          const currentProfile = await loadCurrentProfile(data.session.user.id);
-          void primePrivateDashboard();
-          if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
-        } catch (sessionError) {
-          await supabase.auth.signOut();
-          if (active) setError(sessionError instanceof Error ? sessionError.message : "Không thể mở dashboard.");
+    void supabase.auth.getSession()
+      .then(async ({ data }) => {
+        if (!active) return;
+        if (data.session) {
+          try {
+            const currentProfile = await loadCurrentProfile(data.session.user.id);
+            void primePrivateDashboard();
+            if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
+          } catch (sessionError) {
+            await supabase.auth.signOut();
+            if (active) setError(sessionError instanceof Error ? sessionError.message : "Không thể mở dashboard.");
+          }
         }
-      }
-      if (active) setLoading(false);
-    });
+      })
+      .catch((sessionError) => {
+        if (active) setError(sessionError instanceof Error ? sessionError.message : "Không thể kiểm tra phiên đăng nhập.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT" && active) {
-        setDashboardUrl("");
+        setDashboardHtml("");
         setDashboardLoading(false);
         setDashboardReady(false);
+        setDashboardBootError("");
       }
     });
 
@@ -508,6 +616,13 @@ export default function Home() {
       if (event.data?.type === "clm-dashboard-ready") {
         setDashboardReady(true);
         setDashboardLoading(false);
+        setDashboardBootError("");
+        return;
+      }
+      if (event.data?.type === "clm-dashboard-error") {
+        setDashboardReady(false);
+        setDashboardLoading(false);
+        setDashboardBootError(event.data.error || "Không thể tải dữ liệu dashboard.");
         return;
       }
       if (event.data?.type !== "clm-dashboard-rpc") return;
@@ -568,11 +683,21 @@ export default function Home() {
     return <DashboardLoading checking />;
   }
 
-  if (dashboardUrl || dashboardLoading) {
+  if (dashboardHtml || dashboardLoading || dashboardBootError) {
     return (
       <main className="secure-app">
-        {dashboardUrl && <iframe className={`private-dashboard-frame ${dashboardReady ? "is-ready" : ""}`} src={dashboardUrl} title="ColorME PR Sponsorship Dashboard" allow="clipboard-read; clipboard-write" />}
-        {(!dashboardReady || dashboardLoading) && <DashboardLoading />}
+        {dashboardHtml && (
+          <iframe
+            key={dashboardFrameKey}
+            className={`private-dashboard-frame ${dashboardReady ? "is-ready" : ""}`}
+            srcDoc={dashboardHtml}
+            title="ColorME PR Sponsorship Dashboard"
+            allow="clipboard-read; clipboard-write"
+          />
+        )}
+        {(!dashboardReady || dashboardLoading || dashboardBootError) && (
+          <DashboardLoading error={dashboardBootError} onRetry={() => void retryDashboard()} />
+        )}
       </main>
     );
   }
