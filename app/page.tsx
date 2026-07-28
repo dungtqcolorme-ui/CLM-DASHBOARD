@@ -113,15 +113,21 @@ async function authorizedApi<T>(path: string, init?: RequestInit, activeRole?: A
   const { data } = await supabase.auth.getSession();
   if (!data.session) throw new Error("Phiên đăng nhập đã hết hạn.");
 
-  const response = await fetch(path, {
+  const sendRequest = (accessToken: string) => fetch(path, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${data.session.access_token}`,
+      Authorization: `Bearer ${accessToken}`,
       ...(activeRole ? { "X-CLM-Active-Role": activeRole } : {}),
       ...(init?.headers ?? {}),
     },
   });
+  let response = await sendRequest(data.session.access_token);
+  if (response.status === 401) {
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError || !refreshed.session) throw new Error("Phiên đăng nhập đã hết hạn.");
+    response = await sendRequest(refreshed.session.access_token);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Thao tác tài khoản thất bại.");
   return payload as T;
