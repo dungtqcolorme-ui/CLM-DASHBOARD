@@ -6,11 +6,14 @@ import {
   type AppRole,
   type AuthProfile,
   isAppRole,
+  isProfileStatus,
 } from "@/lib/authTypes";
 import { ApiAuthError, toAuthProfile } from "@/lib/serverAuth";
 
 export const DASHBOARD_TOKEN_COOKIE = "clm-dashboard-access";
+export const DASHBOARD_TOKEN_PART_COOKIE = "clm-dashboard-access-1";
 export const DASHBOARD_ROLE_COOKIE = "clm-dashboard-role";
+export const DASHBOARD_PROFILE_COOKIE = "clm-dashboard-profile";
 
 type ProfileRow = {
   id: string;
@@ -21,7 +24,7 @@ type ProfileRow = {
   updated_at: string;
 };
 
-function createUserClient(token: string) {
+export function createDashboardUserClient(token: string) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -38,7 +41,7 @@ function createUserClient(token: string) {
 
 export async function getDashboardIdentity(token: string, requestedRole = "") {
   if (!token) throw new ApiAuthError("Thiếu phiên đăng nhập.");
-  const client = createUserClient(token);
+  const client = createDashboardUserClient(token);
   const { data: userData, error: userError } = await client.auth.getUser(token);
   if (userError || !userData.user) throw new ApiAuthError("Phiên đăng nhập không hợp lệ.");
 
@@ -77,7 +80,51 @@ export async function getDashboardRequestIdentity(request: Request) {
 
 export async function getDashboardSessionIdentity() {
   const cookieStore = await cookies();
-  const token = cookieStore.get(DASHBOARD_TOKEN_COOKIE)?.value ?? "";
+  const token = [
+    cookieStore.get(DASHBOARD_TOKEN_COOKIE)?.value ?? "",
+    cookieStore.get(DASHBOARD_TOKEN_PART_COOKIE)?.value ?? "",
+  ].join("");
+  if (!token) throw new ApiAuthError("Thiếu phiên đăng nhập.");
+
   const activeRole = cookieStore.get(DASHBOARD_ROLE_COOKIE)?.value ?? "";
-  return getDashboardIdentity(token, activeRole);
+  const encodedProfile = cookieStore.get(DASHBOARD_PROFILE_COOKIE)?.value ?? "";
+  let profile: AuthProfile;
+  try {
+    const parsed = JSON.parse(Buffer.from(encodedProfile, "base64url").toString("utf8")) as Partial<AuthProfile>;
+    const roles = Array.isArray(parsed.roles) ? parsed.roles.filter(isAppRole) : [];
+    if (
+      typeof parsed.id !== "string"
+      || typeof parsed.email !== "string"
+      || typeof parsed.fullName !== "string"
+      || !isProfileStatus(parsed.status)
+      || typeof parsed.createdAt !== "string"
+      || typeof parsed.updatedAt !== "string"
+      || !roles.length
+    ) {
+      throw new Error("Invalid dashboard profile.");
+    }
+    profile = {
+      id: parsed.id,
+      email: parsed.email,
+      fullName: parsed.fullName,
+      status: parsed.status,
+      roles,
+      createdAt: parsed.createdAt,
+      updatedAt: parsed.updatedAt,
+      lastSignInAt: parsed.lastSignInAt,
+    };
+  } catch {
+    throw new ApiAuthError("Phiên dashboard chưa sẵn sàng.");
+  }
+  if (profile.status !== "active") throw new ApiAuthError("Tài khoản không hoạt động.", 403);
+
+  const selectedRole = isAppRole(activeRole) && profile.roles.includes(activeRole)
+    ? activeRole
+    : profile.roles[0];
+  return {
+    token,
+    client: createDashboardUserClient(token),
+    profile,
+    activeRole: selectedRole,
+  };
 }
