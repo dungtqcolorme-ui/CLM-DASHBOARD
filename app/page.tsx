@@ -256,7 +256,7 @@ export default function Home() {
       method: "POST",
       body: JSON.stringify({}),
     }, role);
-    setDashboardUrl(`/api/dashboard/shell?v=30&reload=${Date.now()}`);
+    setDashboardUrl(`/api/dashboard/shell?v=31&reload=${Date.now()}`);
     setDashboardFrameKey((currentKey) => currentKey + 1);
   }, []);
 
