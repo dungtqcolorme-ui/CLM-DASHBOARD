@@ -5,7 +5,8 @@ import { getDashboardSessionIdentity } from "@/lib/dashboardSession";
 import { ApiAuthError } from "@/lib/serverAuth";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
-const PRIVATE_DASHBOARD = "clm-dashboard-private (29).html";
+const PRIVATE_DASHBOARD = "clm-dashboard-private (30).html";
+const FALLBACK_DASHBOARD = "clm-dashboard-private (29).html";
 const SHELL_CACHE_MS = 5 * 60 * 1000;
 
 let shellCache: { html: string; expiresAt: number } | null = null;
@@ -15,9 +16,19 @@ async function loadDashboardShell(client: SupabaseClient) {
   const { data, error } = await client.storage
     .from(PRIVATE_BUCKET)
     .download(PRIVATE_DASHBOARD);
-  if (error || !data) throw error ?? new Error("Không tìm thấy dashboard.");
-  const html = await data.text();
-  shellCache = { html, expiresAt: Date.now() + SHELL_CACHE_MS };
+  if (!error && data) {
+    const html = await data.text();
+    shellCache = { html, expiresAt: Date.now() + SHELL_CACHE_MS };
+    return html;
+  }
+
+  const { data: fallbackData, error: fallbackError } = await client.storage
+    .from(PRIVATE_BUCKET)
+    .download(FALLBACK_DASHBOARD);
+  if (fallbackError || !fallbackData) {
+    throw error ?? fallbackError ?? new Error("Không tìm thấy dashboard.");
+  }
+  const html = await fallbackData.text();
   return html;
 }
 
