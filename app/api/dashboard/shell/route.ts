@@ -6,6 +6,7 @@ import { ApiAuthError } from "@/lib/serverAuth";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
 const DASHBOARD_RELEASES = [
+  "clm-dashboard-private (32).html",
   "clm-dashboard-private (31).html",
   "clm-dashboard-private (30).html",
   "clm-dashboard-private (29).html",
