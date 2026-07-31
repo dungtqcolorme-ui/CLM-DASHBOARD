@@ -11,6 +11,9 @@ type ProfileRow = {
   status: AuthProfile["status"];
   created_at: string;
   updated_at: string;
+  date_of_birth?: string | null;
+  phone?: string;
+  avatar_path?: string;
 };
 
 export class ApiAuthError extends Error {
@@ -28,6 +31,9 @@ export function toAuthProfile(row: ProfileRow, roles: AppRole[]): AuthProfile {
     roles,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    dateOfBirth: row.date_of_birth ?? null,
+    phone: row.phone ?? "",
+    avatarPath: row.avatar_path ?? "",
   };
 }
 
@@ -42,7 +48,7 @@ export async function getRequestIdentity(request: Request) {
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("id,email,full_name,status,created_at,updated_at")
+    .select("id,email,full_name,status,created_at,updated_at,date_of_birth,phone,avatar_path")
     .eq("id", userData.user.id)
     .single<ProfileRow>();
   if (profileError || !profile) throw new ApiAuthError("Tài khoản chưa có hồ sơ hệ thống.", 403);

@@ -6,6 +6,7 @@ import { ApiAuthError } from "@/lib/serverAuth";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
 const DASHBOARD_RELEASES = [
+  "clm-dashboard-private (33).html",
   "clm-dashboard-private (32).html",
   "clm-dashboard-private (31).html",
   "clm-dashboard-private (30).html",
@@ -55,6 +56,13 @@ function escapeHtml(value: string) {
 export async function GET(request: Request) {
   try {
     const identity = await getDashboardSessionIdentity();
+    let avatarUrl = "";
+    if (identity.profile.avatarPath) {
+      const { data } = await identity.client.storage
+        .from("clm-profile-avatars")
+        .createSignedUrl(identity.profile.avatarPath, 60 * 60);
+      avatarUrl = data?.signedUrl ?? "";
+    }
     const profile = {
       id: identity.profile.id,
       email: identity.profile.email,
@@ -64,6 +72,10 @@ export async function GET(request: Request) {
       activeRole: identity.activeRole,
       dashboardRole: dashboardRole(identity.activeRole),
       logoUrl: `${new URL(request.url).origin}/colorme-logo.png`,
+      dateOfBirth: identity.profile.dateOfBirth ?? null,
+      phone: identity.profile.phone ?? "",
+      avatarPath: identity.profile.avatarPath ?? "",
+      avatarUrl,
     };
     const shell = await loadDashboardShell(identity.client);
     const bootstrap = `<script>window.__CLM_BOOTSTRAP_PROFILE__=${safeInlineJson(profile)};</script>`;

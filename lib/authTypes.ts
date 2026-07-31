@@ -17,6 +17,10 @@ export type AuthProfile = {
   createdAt: string;
   updatedAt: string;
   lastSignInAt?: string | null;
+  dateOfBirth?: string | null;
+  phone?: string;
+  avatarPath?: string;
+  avatarUrl?: string;
 };
 
 export function isAppRole(value: unknown): value is AppRole {

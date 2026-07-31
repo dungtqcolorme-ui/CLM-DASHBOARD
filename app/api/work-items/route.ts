@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ApiAuthError, getRequestIdentity } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -6,8 +7,10 @@ import { removeGoogleCalendarMeeting, syncGoogleCalendarMeeting } from "@/lib/go
 type JsonRecord = Record<string, unknown>;
 type Identity = Awaited<ReturnType<typeof getRequestIdentity>>;
 
-const TASK_STATUSES = new Set(["Mới tạo", "Đang thực hiện", "Chờ review", "Cần chỉnh sửa", "Hoàn thành"]);
+const TASK_STATUSES = new Set(["Mới tạo", "Đang thực hiện", "Chờ review", "Cần chỉnh sửa", "Hoàn thành", "Đã lùi hạn"]);
 const MEETING_STATUSES = new Set(["Sắp diễn ra", "Đã hủy"]);
+const MEETING_TYPES = new Set(["google_meet", "in_person"]);
+const RECURRENCE_TYPES = new Set(["none", "weekly", "monthly"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ITEM_ID_PATTERN = /^[A-Za-z0-9:_-]{1,120}$/;
 
@@ -93,8 +96,16 @@ async function canModify(identity: Identity, kind: "task" | "meeting", id: strin
     const { data } = await admin.from("meetings").select("created_by").eq("id", id).maybeSingle();
     return !data || data.created_by === identity.user.id;
   }
+  const { data } = await admin.from("tasks").select("created_by").eq("id", id).maybeSingle();
+  return !data || data.created_by === identity.user.id;
+}
+
+async function canUpdateTaskStatus(identity: Identity, id: string) {
+  if (isManager(identity)) return true;
+  const admin = getSupabaseAdmin();
   const { data } = await admin.from("tasks").select("created_by,owner_id").eq("id", id).maybeSingle();
-  if (!data || data.created_by === identity.user.id || data.owner_id === identity.user.id) return true;
+  if (!data) return false;
+  if (data.created_by === identity.user.id || data.owner_id === identity.user.id) return true;
   const { data: collaborator } = await admin
     .from("task_collaborators")
     .select("task_id")
@@ -104,14 +115,70 @@ async function canModify(identity: Identity, kind: "task" | "meeting", id: strin
   return Boolean(collaborator);
 }
 
-async function insertHistory(kind: "task" | "meeting", id: string, identity: Identity, action: string) {
+async function insertHistory(
+  kind: "task" | "meeting",
+  id: string,
+  identity: Identity,
+  action: string,
+  metadata: JsonRecord = {},
+) {
   const { error } = await getSupabaseAdmin().from("work_history").insert({
     item_kind: kind,
     item_id: id,
     actor_id: identity.user.id,
     action,
+    metadata,
   });
   if (error) throw error;
+}
+
+function vietnamDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: value("year"), month: value("month"), day: value("day") };
+}
+
+function leapYear(year: number) {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+async function ensureBirthdayNotifications() {
+  const admin = getSupabaseAdmin();
+  const today = vietnamDateParts();
+  const { data: profiles, error } = await admin
+    .from("profiles")
+    .select("id,full_name,date_of_birth,status")
+    .eq("status", "active");
+  if (error) throw error;
+  const recipients = (profiles ?? []).map((profile) => profile.id);
+  const birthdays = (profiles ?? []).filter((profile) => {
+    if (!profile.date_of_birth) return false;
+    const [, month, day] = String(profile.date_of_birth).split("-").map(Number);
+    if (month === today.month && day === today.day) return true;
+    return !leapYear(today.year) && today.month === 2 && today.day === 28 && month === 2 && day === 29;
+  });
+  if (!birthdays.length || !recipients.length) return;
+  const dateKey = `${today.year}-${String(today.month).padStart(2, "0")}-${String(today.day).padStart(2, "0")}`;
+  const rows = birthdays.flatMap((birthday) => recipients.map((recipientId) => ({
+    recipient_id: recipientId,
+    event_key: `birthday:${dateKey}:${birthday.id}`,
+    title: "Sinh nhật nhân sự",
+    body: recipientId === birthday.id
+      ? `Chúc ${birthday.full_name} một sinh nhật thật nhiều niềm vui!`
+      : `Hôm nay là sinh nhật của ${birthday.full_name}. Đừng quên gửi lời chúc nhé!`,
+    type: "birthday",
+    item_kind: "profile",
+    item_id: birthday.id,
+  })));
+  const { error: insertError } = await admin
+    .from("user_notifications")
+    .upsert(rows, { onConflict: "recipient_id,event_key", ignoreDuplicates: true });
+  if (insertError) throw insertError;
 }
 
 async function notifyRecipients(
@@ -147,8 +214,65 @@ async function managerIds() {
   return [...new Set((data ?? []).map((row) => row.user_id))];
 }
 
+function duplicatedTaskRow(
+  task: Record<string, unknown>,
+  id: string,
+  deadline: string,
+  reason: string,
+  sourceId: string,
+  actorId: string,
+) {
+  const payload = asRecord(task.raw_payload);
+  return {
+    id,
+    title: task.title,
+    description: task.description ?? "",
+    kind: task.kind,
+    owner_id: task.owner_id,
+    deadline,
+    proof_url: "",
+    status: "Mới tạo",
+    related_meeting_id: task.related_meeting_id ?? "",
+    created_by: task.created_by,
+    raw_payload: {
+      ...payload,
+      id,
+      deadline,
+      status: "Mới tạo",
+      xong: false,
+      proofUrl: "",
+      rescheduledFromTaskId: sourceId,
+      rescheduleReason: reason,
+    },
+    completion_confirmed: false,
+    completed_at: null,
+    completed_by: null,
+    original_task_id: task.original_task_id || sourceId,
+    rescheduled_from_task_id: sourceId,
+    rescheduled_to_task_id: "",
+    reschedule_reason: reason,
+    last_move_mode: "copy",
+    last_move_reason: reason,
+    last_moved_at: new Date().toISOString(),
+    last_moved_by: actorId,
+  };
+}
+
+async function copyTaskCollaborators(sourceId: string, targetId: string) {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin.from("task_collaborators").select("user_id").eq("task_id", sourceId);
+  if (error) throw error;
+  if (!data?.length) return [];
+  const { error: insertError } = await admin.from("task_collaborators").insert(
+    data.map((row) => ({ task_id: targetId, user_id: row.user_id })),
+  );
+  if (insertError) throw insertError;
+  return data.map((row) => row.user_id);
+}
+
 async function loadWorkItems(identity: Identity) {
   const admin = getSupabaseAdmin();
+  await ensureBirthdayNotifications();
   const [
     taskResult,
     collaboratorResult,
@@ -199,7 +323,7 @@ async function loadWorkItems(identity: Identity) {
   const history = new Map<string, JsonRecord[]>();
   for (const row of historyResult.data ?? []) {
     const key = `${row.item_kind}:${row.item_id}`;
-    const item = { id: row.id, by: row.actor_id, action: row.action, t: row.created_at };
+    const item = { id: row.id, by: row.actor_id, action: row.action, metadata: row.metadata ?? {}, t: row.created_at };
     history.set(key, [...(history.get(key) ?? []), item]);
   }
 
@@ -222,6 +346,17 @@ async function loadWorkItems(identity: Identity) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version,
+    completedAt: row.completed_at,
+    completedBy: row.completed_by,
+    completionConfirmed: row.completion_confirmed,
+    originalTaskId: row.original_task_id,
+    rescheduledFromTaskId: row.rescheduled_from_task_id,
+    rescheduledToTaskId: row.rescheduled_to_task_id,
+    rescheduleReason: row.reschedule_reason,
+    lastMoveMode: row.last_move_mode,
+    lastMoveReason: row.last_move_reason,
+    lastMovedAt: row.last_moved_at,
+    lastMovedBy: row.last_moved_by,
     comments: comments.get(`task:${row.id}`) ?? [],
     history: history.get(`task:${row.id}`) ?? [],
     persisted: true,
@@ -241,6 +376,10 @@ async function loadWorkItems(identity: Identity) {
       actions: "",
       taskId: row.related_task_id,
       link: row.meeting_link,
+      meetingType: row.meeting_type,
+      location: row.location,
+      recurrenceType: row.recurrence_type,
+      recurrenceUntil: row.recurrence_until,
       googleEventId: row.google_event_id,
       googleCalendarLink: row.google_calendar_link,
       googleSyncStatus: row.google_sync_status,
@@ -310,6 +449,17 @@ export async function POST(request: Request) {
         throw new ApiAuthError("Cuộc họp vừa được người khác cập nhật. Hãy tải lại trước khi lưu.", 409);
       }
       const status = MEETING_STATUSES.has(cleanText(record.status)) ? cleanText(record.status) : "Sắp diễn ra";
+      const meetingType = MEETING_TYPES.has(cleanText(record.meetingType)) ? cleanText(record.meetingType) : "google_meet";
+      const requestedRecurrence = cleanText(record.recurrenceType);
+      const recurrenceType: "none" | "weekly" | "monthly" = RECURRENCE_TYPES.has(requestedRecurrence)
+        ? requestedRecurrence as "none" | "weekly" | "monthly"
+        : "none";
+      const location = meetingType === "in_person" ? cleanText(record.location, 500) : "";
+      const recurrenceUntilRaw = cleanText(record.recurrenceUntil, 10);
+      const recurrenceUntil = recurrenceUntilRaw ? isoDate(recurrenceUntilRaw) : null;
+      if (meetingType === "in_person" && !location) throw new ApiAuthError("Vui lòng nhập địa điểm họp trực tiếp.", 400);
+      if (recurrenceType !== "none" && !recurrenceUntil) throw new ApiAuthError("Vui lòng chọn ngày kết thúc lặp lại.", 400);
+      if (recurrenceUntil && recurrenceUntil < start.slice(0, 10)) throw new ApiAuthError("Ngày kết thúc lặp lại phải từ ngày bắt đầu trở đi.", 400);
       const { data: saved, error } = await admin.from("meetings").upsert({
         id,
         title,
@@ -317,7 +467,11 @@ export async function POST(request: Request) {
         ends_at: end,
         notes: cleanText(record.notes, 20_000),
         action_items: "",
-        meeting_link: cleanText(record.link, 2_000),
+        meeting_link: meetingType === "google_meet" ? cleanText(record.link, 2_000) : "",
+        meeting_type: meetingType,
+        location,
+        recurrence_type: recurrenceType,
+        recurrence_until: recurrenceUntil,
         related_task_id: cleanText(record.taskId, 120),
         status,
         created_by: existing?.created_by ?? identity.user.id,
@@ -331,13 +485,37 @@ export async function POST(request: Request) {
       if (participantError) throw participantError;
       await insertHistory("meeting", id, identity, existing ? "Cập nhật cuộc họp" : "Tạo cuộc họp");
       await notifyRecipients(identity, "meeting", id, existing ? "Cuộc họp được cập nhật" : "Cuộc họp mới", `“${title}” đã được ${existing ? "cập nhật" : "tạo"}.`, participantIds);
-      let googleSyncStatus = "not_connected";
+      let googleSyncStatus = meetingType === "google_meet" ? "not_connected" : "not_connected";
       let googleEventId = existing?.google_event_id ?? "";
       let meetUrl = cleanText(record.link, 2_000);
       let googleCalendarLink = "";
       let finalVersion = saved.version;
       let finalUpdatedAt = saved.updated_at;
       try {
+        if (meetingType === "in_person") {
+          if (existing?.google_event_id) await removeGoogleCalendarMeeting(existing.google_event_id);
+          const { data: directRow, error: directError } = await admin.from("meetings").update({
+            meeting_link: "",
+            google_event_id: "",
+            google_calendar_link: "",
+            google_sync_status: "not_connected",
+            google_sync_error: "",
+            google_synced_at: null,
+          }).eq("id", id).select("version,updated_at").single();
+          if (directError) throw directError;
+          finalVersion = directRow.version;
+          finalUpdatedAt = directRow.updated_at;
+          return NextResponse.json({
+            saved: true,
+            id,
+            version: finalVersion,
+            updatedAt: finalUpdatedAt,
+            googleSyncStatus,
+            googleEventId: "",
+            meetUrl: "",
+            googleCalendarLink: "",
+          });
+        }
         const calendar = await syncGoogleCalendarMeeting({
           id,
           title,
@@ -345,6 +523,8 @@ export async function POST(request: Request) {
           start,
           end: end ?? new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString(),
           attendeeEmails: participantProfiles.map((profile) => profile.email).filter(Boolean),
+          recurrenceType,
+          recurrenceUntil,
         });
         googleSyncStatus = calendar.status;
         googleEventId = calendar.eventId || googleEventId;
@@ -391,7 +571,6 @@ export async function POST(request: Request) {
     const taskKind = record.type === "coordination" || record.coordination === true ? "coordination" : "personal";
     const collaboratorIds = stringList(record.collaborators).filter((userId) => userId !== ownerId);
     if (!title) throw new ApiAuthError("Vui lòng nhập tiêu đề công việc.", 400);
-    if (!description) throw new ApiAuthError("Vui lòng nhập nội dung công việc.", 400);
     if (taskKind === "coordination" && !collaboratorIds.length) {
       throw new ApiAuthError("Công việc phối hợp phải có ít nhất một người phối hợp.", 400);
     }
@@ -484,6 +663,125 @@ export async function PATCH(request: Request) {
       }
 
       return NextResponse.json({ deleted: true });
+    }
+    if (body.action === "reschedule-task") {
+      ensureOperationalRole(identity);
+      const id = validItemId(body.id);
+      if (!(await canModify(identity, "task", id))) {
+        throw new ApiAuthError("Chỉ người tạo, PR Leader hoặc Admin được di chuyển task này.", 403);
+      }
+      const targetDate = isoDate(body.targetDate);
+      const reason = cleanText(body.reason, 500);
+      const mode = body.mode === "copy" ? "copy" : "move";
+      if (!reason) throw new ApiAuthError("Vui lòng nhập lý do thay đổi ngày.", 400);
+      const admin = getSupabaseAdmin();
+      const { data: task, error: taskError } = await admin.from("tasks").select("*").eq("id", id).single();
+      if (taskError || !task) throw taskError ?? new ApiAuthError("Không tìm thấy task.", 404);
+      if (task.deadline === targetDate) throw new ApiAuthError("Ngày mới phải khác ngày hiện tại.", 400);
+      if (Number(body.version) && Number(body.version) !== Number(task.version)) {
+        throw new ApiAuthError("Task vừa được cập nhật. Hãy tải lại trước khi di chuyển.", 409);
+      }
+      const metadata = { mode, reason, fromDate: task.deadline, toDate: targetDate };
+      if (mode === "copy") {
+        const newId = `T-${randomUUID()}`;
+        const { error: insertError } = await admin.from("tasks").insert(
+          duplicatedTaskRow(task, newId, targetDate, reason, id, identity.user.id),
+        );
+        if (insertError) throw insertError;
+        let collaboratorIds: string[] = [];
+        try {
+          collaboratorIds = await copyTaskCollaborators(id, newId);
+        } catch (copyError) {
+          await admin.from("tasks").delete().eq("id", newId);
+          throw copyError;
+        }
+        await insertHistory("task", id, identity, `Sao chép task sang ${targetDate}`, { ...metadata, targetTaskId: newId });
+        await insertHistory("task", newId, identity, `Tạo từ bản sao của ${id}`, { ...metadata, sourceTaskId: id });
+        await notifyRecipients(identity, "task", newId, "Task được sao chép", `“${task.title}” đã được sao chép sang ngày ${targetDate}.`, [task.owner_id, ...collaboratorIds]);
+        return NextResponse.json({ updated: true, mode, id, targetId: newId });
+      }
+      const nextPayload = { ...asRecord(task.raw_payload), deadline: targetDate, lastMoveReason: reason };
+      const { data: moved, error: moveError } = await admin.from("tasks").update({
+        deadline: targetDate,
+        last_move_mode: "move",
+        last_move_reason: reason,
+        last_moved_at: new Date().toISOString(),
+        last_moved_by: identity.user.id,
+        raw_payload: nextPayload,
+      }).eq("id", id).eq("version", task.version).select("version,updated_at").single();
+      if (moveError) throw moveError;
+      await insertHistory("task", id, identity, `Di chuyển deadline ${task.deadline} → ${targetDate}`, metadata);
+      return NextResponse.json({ updated: true, mode, id, version: moved.version, updatedAt: moved.updated_at });
+    }
+    if (body.action === "update-task-status") {
+      ensureOperationalRole(identity);
+      const id = validItemId(body.id);
+      if (!(await canUpdateTaskStatus(identity, id))) {
+        throw new ApiAuthError("Bạn không có quyền cập nhật trạng thái task này.", 403);
+      }
+      const admin = getSupabaseAdmin();
+      const { data: task, error: taskError } = await admin.from("tasks").select("*").eq("id", id).single();
+      if (taskError || !task) throw taskError ?? new ApiAuthError("Không tìm thấy task.", 404);
+      if (Number(body.version) && Number(body.version) !== Number(task.version)) {
+        throw new ApiAuthError("Task vừa được cập nhật. Hãy tải lại trước khi đổi trạng thái.", 409);
+      }
+      if (body.statusAction === "complete") {
+        if (body.confirmed !== true) throw new ApiAuthError("Bạn cần xác nhận task đã hoàn thành.", 400);
+        const completedAt = new Date().toISOString();
+        const { data: completed, error } = await admin.from("tasks").update({
+          status: "Hoàn thành",
+          completion_confirmed: true,
+          completed_at: completedAt,
+          completed_by: identity.user.id,
+          raw_payload: {
+            ...asRecord(task.raw_payload),
+            status: "Hoàn thành",
+            xong: true,
+            completionConfirmed: true,
+            completedAt,
+            completedBy: identity.user.id,
+          },
+        }).eq("id", id).eq("version", task.version).select("version,updated_at").single();
+        if (error) throw error;
+        await insertHistory("task", id, identity, "Xác nhận hoàn thành task", { completedAt });
+        return NextResponse.json({ updated: true, id, status: "Hoàn thành", completedAt, version: completed.version, updatedAt: completed.updated_at });
+      }
+      if (body.statusAction === "delay") {
+        const newDeadline = isoDate(body.newDeadline);
+        const reason = cleanText(body.reason, 500);
+        if (!reason) throw new ApiAuthError("Vui lòng nhập lý do lùi deadline.", 400);
+        if (newDeadline <= task.deadline) throw new ApiAuthError("Deadline mới phải sau deadline hiện tại.", 400);
+        const newId = `T-${randomUUID()}`;
+        const replacement = duplicatedTaskRow(task, newId, newDeadline, reason, id, identity.user.id);
+        const { error: insertError } = await admin.from("tasks").insert(replacement);
+        if (insertError) throw insertError;
+        let collaboratorIds: string[] = [];
+        try {
+          collaboratorIds = await copyTaskCollaborators(id, newId);
+          const { error: oldUpdateError } = await admin.from("tasks").update({
+            status: "Đã lùi hạn",
+            rescheduled_to_task_id: newId,
+            reschedule_reason: reason,
+            raw_payload: {
+              ...asRecord(task.raw_payload),
+              status: "Đã lùi hạn",
+              xong: false,
+              rescheduledToTaskId: newId,
+              rescheduleReason: reason,
+            },
+          }).eq("id", id).eq("version", task.version);
+          if (oldUpdateError) throw oldUpdateError;
+        } catch (delayError) {
+          await admin.from("tasks").delete().eq("id", newId);
+          throw delayError;
+        }
+        const metadata = { reason, oldDeadline: task.deadline, newDeadline, replacementTaskId: newId };
+        await insertHistory("task", id, identity, `Lùi deadline đến ${newDeadline}`, metadata);
+        await insertHistory("task", newId, identity, `Tạo thay thế task ${id}`, { ...metadata, sourceTaskId: id });
+        await notifyRecipients(identity, "task", newId, "Task được lùi deadline", `“${task.title}” có deadline mới ${newDeadline}.`, [task.owner_id, ...collaboratorIds]);
+        return NextResponse.json({ updated: true, id, status: "Đã lùi hạn", replacementTaskId: newId });
+      }
+      throw new ApiAuthError("Trạng thái yêu cầu không hợp lệ.", 400);
     }
     ensureOperationalRole(identity);
     const kind = body.kind === "meeting" ? "meeting" : "task";

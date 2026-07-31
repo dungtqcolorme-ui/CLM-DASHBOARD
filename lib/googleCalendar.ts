@@ -20,6 +20,8 @@ type CalendarEventInput = {
   start: string;
   end: string;
   attendeeEmails: string[];
+  recurrenceType: "none" | "weekly" | "monthly";
+  recurrenceUntil: string | null;
 };
 
 type GoogleCalendarEvent = {
@@ -152,12 +154,16 @@ export async function syncGoogleCalendarMeeting(input: CalendarEventInput) {
     token,
     `/calendars/${calendarId}/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1`,
   );
+  const recurrence = input.recurrenceType !== "none" && input.recurrenceUntil
+    ? [`RRULE:FREQ=${input.recurrenceType === "weekly" ? "WEEKLY" : "MONTHLY"};UNTIL=${input.recurrenceUntil.replaceAll("-", "")}T165959Z`]
+    : undefined;
   const commonBody = {
     summary: input.title,
     description: input.notes,
     start: { dateTime: input.start, timeZone: "Asia/Ho_Chi_Minh" },
     end: { dateTime: input.end, timeZone: "Asia/Ho_Chi_Minh" },
     attendees: [...new Set(input.attendeeEmails)].map((email) => ({ email })),
+    recurrence,
   };
   const event = existing
     ? await calendarRequest<GoogleCalendarEvent>(

@@ -35,18 +35,16 @@ type DashboardRpcMessage = {
     | "add-work-comment"
     | "mark-notifications"
     | "delete-notifications"
+    | "reschedule-work-item"
+    | "update-work-status"
+    | "get-account-profile"
+    | "update-account-profile"
+    | "change-password"
+    | "upload-avatar"
+    | "delete-avatar"
     | "get-google-calendar-status"
     | "connect-google-calendar";
   payload?: Record<string, unknown>;
-};
-
-type ProfileRow = {
-  id: string;
-  email: string;
-  full_name: string;
-  status: AuthProfile["status"];
-  created_at: string;
-  updated_at: string;
 };
 
 type DashboardBridgeWindow = Window & {
@@ -113,15 +111,15 @@ async function authorizedApi<T>(path: string, init?: RequestInit, activeRole?: A
   const { data } = await supabase.auth.getSession();
   if (!data.session) throw new Error("Phiên đăng nhập đã hết hạn.");
 
-  const sendRequest = (accessToken: string) => fetch(path, {
+  const sendRequest = (accessToken: string) => withTimeout(fetch(path, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(!(init?.body instanceof FormData) && !(init?.body instanceof Blob) ? { "Content-Type": "application/json" } : {}),
       Authorization: `Bearer ${accessToken}`,
       ...(activeRole ? { "X-CLM-Active-Role": activeRole } : {}),
       ...(init?.headers ?? {}),
     },
-  });
+  }), 20_000, "Kết nối máy chủ quá thời gian. Vui lòng thử lại.");
   let response = await sendRequest(data.session.access_token);
   if (response.status === 401) {
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
@@ -215,37 +213,8 @@ export default function Home() {
   const activeRoleRef = useRef<AppRole | "">("");
   const dashboardFrameRef = useRef<HTMLIFrameElement>(null);
 
-  const loadCurrentProfile = useCallback(async (knownUserId?: string) => {
-    const supabase = getSupabaseClient();
-    let userId = knownUserId;
-    if (!userId) {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) throw new Error("Phiên đăng nhập không hợp lệ.");
-      userId = userData.user.id;
-    }
-
-    const [{ data: profileRow, error: profileError }, { data: roleRows, error: roleError }] = await Promise.all([
-      supabase.from("profiles").select("id,email,full_name,status,created_at,updated_at").eq("id", userId).single<ProfileRow>(),
-      supabase.from("user_roles").select("role").eq("user_id", userId),
-    ]);
-    if (profileError || !profileRow) throw new Error("Tài khoản chưa có hồ sơ hệ thống.");
-    if (roleError) throw new Error("Không thể đọc quyền tài khoản.");
-    if (profileRow.status === "pending") throw new Error("Tài khoản đang chờ PR Leader hoặc Admin phê duyệt.");
-    if (profileRow.status === "locked") throw new Error("Tài khoản đã bị khóa.");
-
-    const roles = (roleRows ?? []).map((row) => row.role).filter((role): role is AppRole =>
-      role === "Admin" || role === "PR Leader" || role === "PR Representative" || role === "Viewer",
-    );
-    if (!roles.length) throw new Error("Tài khoản chưa được phân quyền.");
-    const nextProfile: AuthProfile = {
-      id: profileRow.id,
-      email: profileRow.email,
-      fullName: profileRow.full_name,
-      status: profileRow.status,
-      roles,
-      createdAt: profileRow.created_at,
-      updatedAt: profileRow.updated_at,
-    };
+  const loadCurrentProfile = useCallback(async () => {
+    const { profile: nextProfile } = await authorizedApi<{ profile: AuthProfile }>("/api/auth/profile");
     profileRef.current = nextProfile;
     setProfile(nextProfile);
     return nextProfile;
@@ -256,7 +225,7 @@ export default function Home() {
       method: "POST",
       body: JSON.stringify({}),
     }, role);
-    setDashboardUrl(`/api/dashboard/shell?v=32&reload=${Date.now()}`);
+    setDashboardUrl(`/api/dashboard/shell?v=33&reload=${Date.now()}`);
     setDashboardFrameKey((currentKey) => currentKey + 1);
   }, []);
 
@@ -303,6 +272,10 @@ export default function Home() {
         fullName: currentProfile.fullName,
         status: currentProfile.status,
         roles: currentProfile.roles,
+        dateOfBirth: currentProfile.dateOfBirth ?? "",
+        phone: currentProfile.phone ?? "",
+        avatarPath: currentProfile.avatarPath ?? "",
+        avatarUrl: currentProfile.avatarUrl ?? "",
         activeRole: activeRoleRef.current,
         dashboardRole: dashboardRole(activeRoleRef.current),
         logoUrl: `${window.location.origin}/colorme-logo.png`,
@@ -359,6 +332,54 @@ export default function Home() {
         method: "PATCH",
         body: JSON.stringify({ ...payload, action: "delete-notifications" }),
       }, requestRole);
+    }
+    if (message.action === "reschedule-work-item" || message.action === "update-work-status") {
+      return authorizedApi("/api/work-items", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...payload,
+          action: message.action === "reschedule-work-item" ? "reschedule-task" : "update-task-status",
+        }),
+      }, requestRole);
+    }
+    if (message.action === "get-account-profile") {
+      return authorizedApi("/api/account/profile", undefined, requestRole);
+    }
+    if (message.action === "update-account-profile") {
+      const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }, requestRole);
+      profileRef.current = result.profile;
+      setProfile(result.profile);
+      return result;
+    }
+    if (message.action === "change-password") {
+      return authorizedApi("/api/account/profile", {
+        method: "POST",
+        body: JSON.stringify({ ...payload, action: "change-password" }),
+      }, requestRole);
+    }
+    if (message.action === "upload-avatar") {
+      const file = payload.file;
+      if (!(file instanceof Blob)) throw new Error("Không nhận được ảnh đại diện.");
+      const form = new FormData();
+      form.set("file", file, typeof payload.name === "string" ? payload.name : "avatar");
+      const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
+        method: "PUT",
+        body: form,
+      }, requestRole);
+      profileRef.current = result.profile;
+      setProfile(result.profile);
+      return result;
+    }
+    if (message.action === "delete-avatar") {
+      const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
+        method: "DELETE",
+      }, requestRole);
+      profileRef.current = result.profile;
+      setProfile(result.profile);
+      return result;
     }
     if (message.action === "get-google-calendar-status") {
       return authorizedApi("/api/google/calendar", undefined, requestRole);
@@ -447,20 +468,10 @@ export default function Home() {
 
       const saveOperation = saveQueueRef.current.then(async () => {
         const stateBlob = await compressState(json);
-        const { error: uploadError } = await supabase.storage.from(STATE_BUCKET).upload(STATE_FILE, stateBlob, {
-          contentType: stateBlob.type,
-          upsert: true,
-          cacheControl: "0",
-        });
-        if (uploadError) throw uploadError;
-        const { data: userData } = await supabase.auth.getUser();
-        const { error: metaError } = await supabase.from("dashboard_state_meta").upsert({
-          id: "main",
-          updated_at: new Date().toISOString(),
-          updated_by: userData.user?.id ?? null,
-          size_bytes: stateBlob.size,
-        });
-        if (metaError) throw metaError;
+        await authorizedApi("/api/dashboard/state", {
+          method: "PUT",
+          body: stateBlob,
+        }, requestRole);
         if ("caches" in window) {
           const cache = await caches.open(STATE_CACHE);
           await cache.put(STATE_CACHE_URL, new Response(stateBlob, {
@@ -566,7 +577,7 @@ export default function Home() {
         if (!active) return;
         if (data.session) {
           try {
-            const currentProfile = await loadCurrentProfile(data.session.user.id);
+            const currentProfile = await loadCurrentProfile();
             if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
           } catch (sessionError) {
             await supabase.auth.signOut();
@@ -663,7 +674,7 @@ export default function Home() {
       const supabase = getSupabaseClient();
       const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (loginError || !loginData.user) throw new Error("Email hoặc mật khẩu không đúng.");
-      const currentProfile = await loadCurrentProfile(loginData.user.id);
+      const currentProfile = await loadCurrentProfile();
       if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
     } catch (loginError) {
       await getSupabaseClient().auth.signOut();

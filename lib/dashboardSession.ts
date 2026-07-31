@@ -22,6 +22,9 @@ type ProfileRow = {
   status: AuthProfile["status"];
   created_at: string;
   updated_at: string;
+  date_of_birth: string | null;
+  phone: string;
+  avatar_path: string;
 };
 
 export function createDashboardUserClient(token: string) {
@@ -48,7 +51,7 @@ export async function getDashboardIdentity(token: string, requestedRole = "") {
   const [{ data: profile, error: profileError }, { data: roleRows, error: rolesError }] = await Promise.all([
     client
       .from("profiles")
-      .select("id,email,full_name,status,created_at,updated_at")
+      .select("id,email,full_name,status,created_at,updated_at,date_of_birth,phone,avatar_path")
       .eq("id", userData.user.id)
       .single<ProfileRow>(),
     client.from("user_roles").select("role").eq("user_id", userData.user.id),
@@ -112,6 +115,9 @@ export async function getDashboardSessionIdentity() {
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
       lastSignInAt: parsed.lastSignInAt,
+      dateOfBirth: typeof parsed.dateOfBirth === "string" ? parsed.dateOfBirth : null,
+      phone: typeof parsed.phone === "string" ? parsed.phone : "",
+      avatarPath: typeof parsed.avatarPath === "string" ? parsed.avatarPath : "",
     };
   } catch {
     throw new ApiAuthError("Phiên dashboard chưa sẵn sàng.");
