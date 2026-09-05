@@ -1,17 +1,21 @@
-import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ApiAuthError, getRequestIdentity } from "@/lib/serverAuth";
-import { GOOGLE_OAUTH_STATE_COOKIE, googleOAuthConfig } from "@/lib/googleCalendar";
+import {
+  createGoogleOAuthState,
+  GOOGLE_OAUTH_STATE_COOKIE,
+  GOOGLE_REQUIRED_SCOPES,
+  googleOAuthConfig,
+} from "@/lib/googleOAuth";
 
 export async function POST(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
     if (identity.activeRole !== "Admin" && identity.activeRole !== "PR Leader") {
-      throw new ApiAuthError("Chỉ Admin hoặc PR Leader được kết nối Google Calendar.", 403);
+      throw new ApiAuthError("Chỉ Admin hoặc PR Leader được kết nối Google Calendar và Gmail.", 403);
     }
     const origin = new URL(request.url).origin;
     const { clientId, redirectUri } = googleOAuthConfig(origin);
-    const state = randomBytes(32).toString("base64url");
+    const { state, cookieValue } = createGoogleOAuthState(identity.user.id);
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -19,14 +23,10 @@ export async function POST(request: Request) {
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent");
     url.searchParams.set("include_granted_scopes", "true");
-    url.searchParams.set("scope", [
-      "openid",
-      "email",
-      "https://www.googleapis.com/auth/calendar.events",
-    ].join(" "));
+    url.searchParams.set("scope", GOOGLE_REQUIRED_SCOPES.join(" "));
     url.searchParams.set("state", state);
     const response = NextResponse.json({ url: url.toString() });
-    response.cookies.set(GOOGLE_OAUTH_STATE_COOKIE, state, {
+    response.cookies.set(GOOGLE_OAUTH_STATE_COOKIE, cookieValue, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

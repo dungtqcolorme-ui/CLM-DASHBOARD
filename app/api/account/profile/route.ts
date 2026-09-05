@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import type { AuthProfile } from "@/lib/authTypes";
 import { ApiAuthError, getRequestIdentity } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -26,37 +27,25 @@ async function signedAvatarUrl(path: string) {
   return data.signedUrl;
 }
 
-async function accountProfile(userId: string) {
-  const admin = getSupabaseAdmin();
-  const [{ data: profile, error }, { data: roleRows, error: rolesError }] = await Promise.all([
-    admin
-      .from("profiles")
-      .select("id,email,full_name,status,created_at,updated_at,date_of_birth,phone,avatar_path")
-      .eq("id", userId)
-      .single(),
-    admin.from("user_roles").select("role").eq("user_id", userId),
-  ]);
-  if (error || !profile) throw error ?? new ApiAuthError("Không tìm thấy hồ sơ.", 404);
-  if (rolesError) throw rolesError;
+type ProfileOverrides = Partial<Pick<
+  AuthProfile,
+  "fullName" | "updatedAt" | "dateOfBirth" | "phone" | "avatarPath"
+>>;
+
+async function accountProfile(profile: AuthProfile, overrides: ProfileOverrides = {}) {
+  const nextProfile = { ...profile, ...overrides };
+  const avatarPath = nextProfile.avatarPath ?? "";
   return {
-    id: profile.id,
-    email: profile.email,
-    fullName: profile.full_name,
-    status: profile.status,
-    roles: (roleRows ?? []).map((row) => row.role),
-    createdAt: profile.created_at,
-    updatedAt: profile.updated_at,
-    dateOfBirth: profile.date_of_birth,
-    phone: profile.phone,
-    avatarPath: profile.avatar_path,
-    avatarUrl: await signedAvatarUrl(profile.avatar_path),
+    ...nextProfile,
+    avatarPath,
+    avatarUrl: await signedAvatarUrl(avatarPath),
   };
 }
 
 export async function GET(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
-    return NextResponse.json({ profile: await accountProfile(identity.user.id) });
+    return NextResponse.json({ profile: await accountProfile(identity.profile) });
   } catch (error) {
     return apiError(error, "Không thể tải hồ sơ cá nhân.");
   }
@@ -80,12 +69,17 @@ export async function PATCH(request: Request) {
     }
 
     const admin = getSupabaseAdmin();
-    const { error } = await admin.from("profiles").update({
-      full_name: fullName,
-      phone,
-      date_of_birth: dateOfBirth,
-    }).eq("id", identity.user.id);
-    if (error) throw error;
+    const { data: updatedProfile, error } = await admin
+      .from("profiles")
+      .update({
+        full_name: fullName,
+        phone,
+        date_of_birth: dateOfBirth,
+      })
+      .eq("id", identity.user.id)
+      .select("updated_at")
+      .single<{ updated_at: string }>();
+    if (error || !updatedProfile) throw error ?? new Error("Không thể đọc hồ sơ vừa cập nhật.");
     const { error: authError } = await admin.auth.admin.updateUserById(identity.user.id, {
       user_metadata: {
         ...(identity.user.user_metadata ?? {}),
@@ -93,7 +87,15 @@ export async function PATCH(request: Request) {
       },
     });
     if (authError) throw authError;
-    return NextResponse.json({ updated: true, profile: await accountProfile(identity.user.id) });
+    return NextResponse.json({
+      updated: true,
+      profile: await accountProfile(identity.profile, {
+        fullName,
+        phone,
+        dateOfBirth,
+        updatedAt: updatedProfile.updated_at,
+      }),
+    });
   } catch (error) {
     return apiError(error, "Không thể cập nhật hồ sơ.");
   }
@@ -145,11 +147,7 @@ export async function PUT(request: Request) {
     if (!file.size || file.size > MAX_AVATAR_BYTES) throw new ApiAuthError("Ảnh đại diện phải nhỏ hơn 5 MB.", 400);
 
     const admin = getSupabaseAdmin();
-    const { data: oldProfile } = await admin
-      .from("profiles")
-      .select("avatar_path")
-      .eq("id", identity.user.id)
-      .single<{ avatar_path: string }>();
+    const oldAvatarPath = identity.profile.avatarPath ?? "";
     const path = `${identity.user.id}/avatar-${Date.now()}.${extension}`;
     const { error: uploadError } = await admin.storage.from(AVATAR_BUCKET).upload(
       path,
@@ -157,18 +155,26 @@ export async function PUT(request: Request) {
       { contentType: file.type, upsert: false, cacheControl: "3600" },
     );
     if (uploadError) throw uploadError;
-    const { error: profileError } = await admin
+    const { data: updatedProfile, error: profileError } = await admin
       .from("profiles")
       .update({ avatar_path: path })
-      .eq("id", identity.user.id);
-    if (profileError) {
+      .eq("id", identity.user.id)
+      .select("updated_at")
+      .single<{ updated_at: string }>();
+    if (profileError || !updatedProfile) {
       await admin.storage.from(AVATAR_BUCKET).remove([path]);
-      throw profileError;
+      throw profileError ?? new Error("Không thể đọc hồ sơ vừa cập nhật.");
     }
-    if (oldProfile?.avatar_path && oldProfile.avatar_path !== path) {
-      await admin.storage.from(AVATAR_BUCKET).remove([oldProfile.avatar_path]);
+    if (oldAvatarPath && oldAvatarPath !== path) {
+      await admin.storage.from(AVATAR_BUCKET).remove([oldAvatarPath]);
     }
-    return NextResponse.json({ uploaded: true, profile: await accountProfile(identity.user.id) });
+    return NextResponse.json({
+      uploaded: true,
+      profile: await accountProfile(identity.profile, {
+        avatarPath: path,
+        updatedAt: updatedProfile.updated_at,
+      }),
+    });
   } catch (error) {
     return apiError(error, "Không thể tải ảnh đại diện.");
   }
@@ -178,19 +184,22 @@ export async function DELETE(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
     const admin = getSupabaseAdmin();
-    const { data: profile, error } = await admin
-      .from("profiles")
-      .select("avatar_path")
-      .eq("id", identity.user.id)
-      .single<{ avatar_path: string }>();
-    if (error) throw error;
-    if (profile.avatar_path) await admin.storage.from(AVATAR_BUCKET).remove([profile.avatar_path]);
-    const { error: updateError } = await admin
+    const avatarPath = identity.profile.avatarPath ?? "";
+    if (avatarPath) await admin.storage.from(AVATAR_BUCKET).remove([avatarPath]);
+    const { data: updatedProfile, error: updateError } = await admin
       .from("profiles")
       .update({ avatar_path: "" })
-      .eq("id", identity.user.id);
-    if (updateError) throw updateError;
-    return NextResponse.json({ deleted: true, profile: await accountProfile(identity.user.id) });
+      .eq("id", identity.user.id)
+      .select("updated_at")
+      .single<{ updated_at: string }>();
+    if (updateError || !updatedProfile) throw updateError ?? new Error("Không thể đọc hồ sơ vừa cập nhật.");
+    return NextResponse.json({
+      deleted: true,
+      profile: await accountProfile(identity.profile, {
+        avatarPath: "",
+        updatedAt: updatedProfile.updated_at,
+      }),
+    });
   } catch (error) {
     return apiError(error, "Không thể xóa ảnh đại diện.");
   }

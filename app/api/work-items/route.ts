@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 import { ApiAuthError, getRequestIdentity } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { removeGoogleCalendarMeeting, syncGoogleCalendarMeeting } from "@/lib/googleCalendar";
+import {
+  buildDuplicateTaskRow,
+  canCreateTaskForRole,
+  canDuplicateTaskSource,
+  normalizeTaskShift,
+  taskShiftLabel,
+  TaskManagementValidationError,
+} from "@/lib/taskManagement";
 
 type JsonRecord = Record<string, unknown>;
 type Identity = Awaited<ReturnType<typeof getRequestIdentity>>;
@@ -15,7 +23,9 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const ITEM_ID_PATTERN = /^[A-Za-z0-9:_-]{1,120}$/;
 
 function apiError(error: unknown, fallback: string) {
-  const status = error instanceof ApiAuthError ? error.status : 500;
+  const status = error instanceof ApiAuthError || error instanceof TaskManagementValidationError
+    ? error.status
+    : 500;
   const message = error instanceof Error ? error.message : fallback;
   return NextResponse.json({ error: message }, { status });
 }
@@ -40,6 +50,12 @@ function isManager(identity: Identity) {
 function ensureOperationalRole(identity: Identity) {
   if (identity.activeRole === "Viewer") {
     throw new ApiAuthError("Viewer chỉ có quyền xem công việc.", 403);
+  }
+}
+
+function ensureTaskCreationRole(identity: Identity) {
+  if (!canCreateTaskForRole(identity.activeRole)) {
+    throw new ApiAuthError("Bạn không có quyền tạo hoặc nhân bản task.", 403);
   }
 }
 
@@ -90,28 +106,48 @@ async function assertActiveProfiles(ids: string[]) {
 }
 
 async function canModify(identity: Identity, kind: "task" | "meeting", id: string) {
-  if (isManager(identity)) return true;
   const admin = getSupabaseAdmin();
   if (kind === "meeting") {
-    const { data } = await admin.from("meetings").select("created_by").eq("id", id).maybeSingle();
+    if (isManager(identity)) return true;
+    const { data, error } = await admin.from("meetings").select("created_by").eq("id", id).maybeSingle();
+    if (error) throw error;
     return !data || data.created_by === identity.user.id;
   }
-  const { data } = await admin.from("tasks").select("created_by").eq("id", id).maybeSingle();
-  return !data || data.created_by === identity.user.id;
+  const { data, error } = await admin.from("tasks").select("created_by,deleted_at").eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (data?.deleted_at) return false;
+  return !data || isManager(identity) || data.created_by === identity.user.id;
+}
+
+async function canDuplicateSource(identity: Identity, id: string) {
+  const { data, error } = await getSupabaseAdmin()
+    .from("tasks")
+    .select("created_by,deleted_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data && !data.deleted_at && canDuplicateTaskSource({
+    role: identity.activeRole,
+    actorId: identity.user.id,
+    sourceCreatedBy: data.created_by,
+  }));
 }
 
 async function canUpdateTaskStatus(identity: Identity, id: string) {
   if (isManager(identity)) return true;
   const admin = getSupabaseAdmin();
-  const { data } = await admin.from("tasks").select("created_by,owner_id").eq("id", id).maybeSingle();
+  const { data, error } = await admin.from("tasks").select("created_by,owner_id,deleted_at").eq("id", id).maybeSingle();
+  if (error) throw error;
   if (!data) return false;
+  if (data.deleted_at) return false;
   if (data.created_by === identity.user.id || data.owner_id === identity.user.id) return true;
-  const { data: collaborator } = await admin
+  const { data: collaborator, error: collaboratorError } = await admin
     .from("task_collaborators")
     .select("task_id")
     .eq("task_id", id)
     .eq("user_id", identity.user.id)
     .maybeSingle();
+  if (collaboratorError) throw collaboratorError;
   return Boolean(collaborator);
 }
 
@@ -223,6 +259,7 @@ function duplicatedTaskRow(
   actorId: string,
 ) {
   const payload = asRecord(task.raw_payload);
+  const shift = normalizeTaskShift(task.shift ?? payload.shift, { strict: false });
   return {
     id,
     title: task.title,
@@ -230,6 +267,8 @@ function duplicatedTaskRow(
     kind: task.kind,
     owner_id: task.owner_id,
     deadline,
+    task_date: deadline,
+    shift,
     proof_url: "",
     status: "Mới tạo",
     related_meeting_id: task.related_meeting_id ?? "",
@@ -238,6 +277,10 @@ function duplicatedTaskRow(
       ...payload,
       id,
       deadline,
+      taskDate: deadline,
+      task_date: deadline,
+      shift,
+      shiftLabel: taskShiftLabel(shift),
       status: "Mới tạo",
       xong: false,
       proofUrl: "",
@@ -284,7 +327,7 @@ async function loadWorkItems(identity: Identity) {
     notificationResult,
     dismissalResult,
   ] = await Promise.all([
-    admin.from("tasks").select("*").order("updated_at", { ascending: false }),
+    admin.from("tasks").select("*").is("deleted_at", null).order("updated_at", { ascending: false }),
     admin.from("task_collaborators").select("task_id,user_id"),
     admin.from("meetings").select("*").order("starts_at", { ascending: true }),
     admin.from("meeting_participants").select("meeting_id,user_id"),
@@ -313,7 +356,7 @@ async function loadWorkItems(identity: Identity) {
     const item = {
       id: row.id,
       by: row.author_id,
-      name: row.author_name || names.get(row.author_id) || "Người dùng",
+      name: names.get(row.author_id) || row.author_name || "Người dùng",
       text: row.body,
       attachments: row.attachments ?? [],
       t: row.created_at,
@@ -323,7 +366,14 @@ async function loadWorkItems(identity: Identity) {
   const history = new Map<string, JsonRecord[]>();
   for (const row of historyResult.data ?? []) {
     const key = `${row.item_kind}:${row.item_id}`;
-    const item = { id: row.id, by: row.actor_id, action: row.action, metadata: row.metadata ?? {}, t: row.created_at };
+    const item = {
+      id: row.id,
+      by: row.actor_id,
+      actorName: names.get(row.actor_id) || "Người dùng",
+      action: row.action,
+      metadata: row.metadata ?? {},
+      t: row.created_at,
+    };
     history.set(key, [...(history.get(key) ?? []), item]);
   }
 
@@ -334,8 +384,13 @@ async function loadWorkItems(identity: Identity) {
     description: row.description,
     note: row.description,
     nguoi: row.owner_id,
+    ownerName: names.get(row.owner_id) || "Người dùng",
     collaborators: collaborators.get(row.id) ?? [],
+    collaboratorNames: (collaborators.get(row.id) ?? []).map((id) => names.get(id) || "Người dùng"),
     deadline: row.deadline,
+    taskDate: row.task_date ?? row.deadline,
+    shift: normalizeTaskShift(row.shift ?? asRecord(row.raw_payload).shift, { strict: false }),
+    shiftLabel: taskShiftLabel(row.shift ?? asRecord(row.raw_payload).shift),
     proofUrl: row.proof_url,
     status: row.status,
     xong: row.status === "Hoàn thành",
@@ -343,6 +398,7 @@ async function loadWorkItems(identity: Identity) {
     type: row.kind,
     relatedMeetingId: row.related_meeting_id,
     createdBy: row.created_by,
+    createdByName: names.get(row.created_by) || "Người dùng",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version,
@@ -357,6 +413,9 @@ async function loadWorkItems(identity: Identity) {
     lastMoveReason: row.last_move_reason,
     lastMovedAt: row.last_moved_at,
     lastMovedBy: row.last_moved_by,
+    duplicatedFromTaskId: row.duplicated_from_task_id,
+    duplicateRootTaskId: row.duplicate_root_task_id,
+    duplicatedBy: row.duplicated_by,
     comments: comments.get(`task:${row.id}`) ?? [],
     history: history.get(`task:${row.id}`) ?? [],
     persisted: true,
@@ -385,6 +444,7 @@ async function loadWorkItems(identity: Identity) {
       googleSyncStatus: row.google_sync_status,
       status: row.status,
       createdBy: row.created_by,
+      createdByName: names.get(row.created_by) || "Người dùng",
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       version: row.version,
@@ -575,7 +635,8 @@ export async function POST(request: Request) {
       throw new ApiAuthError("Công việc phối hợp phải có ít nhất một người phối hợp.", 400);
     }
     await assertActiveProfiles([ownerId, ...collaboratorIds]);
-    const { data: existing } = await admin.from("tasks").select("created_by,version,status").eq("id", id).maybeSingle();
+    const { data: existing } = await admin.from("tasks").select("created_by,version,status,task_date,shift,deleted_at").eq("id", id).maybeSingle();
+    if (existing?.deleted_at) throw new ApiAuthError("Task đã bị xóa và không thể cập nhật.", 409);
     if (existing && Number(record.version) && Number(record.version) !== existing.version) {
       throw new ApiAuthError("Công việc vừa được người khác cập nhật. Hãy tải lại trước khi lưu.", 409);
     }
@@ -585,6 +646,20 @@ export async function POST(request: Request) {
       if (proofUrl) status = "Chờ review";
       else if (status === "Hoàn thành" || status === "Cần chỉnh sửa") status = existing?.status === "Cần chỉnh sửa" ? "Cần chỉnh sửa" : "Đang thực hiện";
     }
+    const suppliedTaskDate = cleanText(record.taskDate ?? record.task_date, 10);
+    const taskDate = suppliedTaskDate
+      ? isoDate(suppliedTaskDate)
+      : existing?.task_date ?? deadline;
+    const hasShiftInput = Object.prototype.hasOwnProperty.call(record, "shift")
+      || Object.prototype.hasOwnProperty.call(record, "taskShift");
+    const shift = hasShiftInput
+      ? normalizeTaskShift(record.shift ?? record.taskShift)
+      : normalizeTaskShift(existing?.shift, { strict: false });
+    const rawPayload = {
+      ...safeRawPayload(record),
+      shift,
+      shiftLabel: taskShiftLabel(shift),
+    };
     const { data: saved, error } = await admin.from("tasks").upsert({
       id,
       title,
@@ -592,11 +667,13 @@ export async function POST(request: Request) {
       kind: taskKind,
       owner_id: ownerId,
       deadline,
+      task_date: taskDate,
+      shift,
       proof_url: proofUrl,
       status,
       related_meeting_id: cleanText(record.relatedMeetingId, 120),
       created_by: existing?.created_by ?? identity.user.id,
-      raw_payload: safeRawPayload(record),
+      raw_payload: rawPayload,
     }).select("version,updated_at,status").single();
     if (error) throw error;
     await admin.from("task_collaborators").delete().eq("task_id", id);
@@ -664,6 +741,71 @@ export async function PATCH(request: Request) {
 
       return NextResponse.json({ deleted: true });
     }
+    if (body.action === "duplicate-task") {
+      ensureTaskCreationRole(identity);
+      const sourceId = validItemId(body.id ?? body.sourceId);
+      if (!(await canDuplicateSource(identity, sourceId))) {
+        throw new ApiAuthError("Chỉ người tạo, PR Leader hoặc Admin được nhân bản task này.", 403);
+      }
+      const admin = getSupabaseAdmin();
+      const { data: sourceTask, error: sourceError } = await admin
+        .from("tasks")
+        .select("*")
+        .eq("id", sourceId)
+        .is("deleted_at", null)
+        .single();
+      if (sourceError || !sourceTask) {
+        throw sourceError ?? new ApiAuthError("Không tìm thấy task cần nhân bản.", 404);
+      }
+      if (Number(body.version) && Number(body.version) !== Number(sourceTask.version)) {
+        throw new ApiAuthError("Task vừa được cập nhật. Hãy tải lại trước khi nhân bản.", 409);
+      }
+      const requestedDate = cleanText(body.taskDate ?? body.targetDate ?? body.deadline, 10);
+      const taskDate = requestedDate
+        ? isoDate(requestedDate)
+        : sourceTask.task_date ?? sourceTask.deadline;
+      const targetId = `T-${randomUUID()}`;
+      const duplicatedRow = buildDuplicateTaskRow(sourceTask, {
+        id: targetId,
+        actorId: identity.user.id,
+        taskDate,
+      });
+      const { error: insertError } = await admin.from("tasks").insert(duplicatedRow);
+      if (insertError) throw insertError;
+      let collaboratorIds: string[] = [];
+      try {
+        collaboratorIds = await copyTaskCollaborators(sourceId, targetId);
+      } catch (copyError) {
+        await admin.from("tasks").delete().eq("id", targetId);
+        throw copyError;
+      }
+      const metadata = {
+        sourceTaskId: sourceId,
+        targetTaskId: targetId,
+        duplicateRootTaskId: duplicatedRow.duplicate_root_task_id,
+        taskDate,
+        shift: duplicatedRow.shift,
+      };
+      await insertHistory("task", sourceId, identity, `Nhân bản thành task ${targetId}`, metadata);
+      await insertHistory("task", targetId, identity, `Nhân bản từ task ${sourceId}`, metadata);
+      await notifyRecipients(
+        identity,
+        "task",
+        targetId,
+        "Task mới được nhân bản",
+        `“${sourceTask.title}” đã được nhân bản với trạng thái Mới tạo.`,
+        [sourceTask.owner_id, ...collaboratorIds],
+      );
+      return NextResponse.json({
+        duplicated: true,
+        sourceId,
+        targetId,
+        status: "Mới tạo",
+        taskDate,
+        shift: duplicatedRow.shift,
+        shiftLabel: taskShiftLabel(duplicatedRow.shift),
+      });
+    }
     if (body.action === "reschedule-task") {
       ensureOperationalRole(identity);
       const id = validItemId(body.id);
@@ -675,7 +817,7 @@ export async function PATCH(request: Request) {
       const mode = body.mode === "copy" ? "copy" : "move";
       if (!reason) throw new ApiAuthError("Vui lòng nhập lý do thay đổi ngày.", 400);
       const admin = getSupabaseAdmin();
-      const { data: task, error: taskError } = await admin.from("tasks").select("*").eq("id", id).single();
+      const { data: task, error: taskError } = await admin.from("tasks").select("*").eq("id", id).is("deleted_at", null).single();
       if (taskError || !task) throw taskError ?? new ApiAuthError("Không tìm thấy task.", 404);
       if (task.deadline === targetDate) throw new ApiAuthError("Ngày mới phải khác ngày hiện tại.", 400);
       if (Number(body.version) && Number(body.version) !== Number(task.version)) {
@@ -700,9 +842,16 @@ export async function PATCH(request: Request) {
         await notifyRecipients(identity, "task", newId, "Task được sao chép", `“${task.title}” đã được sao chép sang ngày ${targetDate}.`, [task.owner_id, ...collaboratorIds]);
         return NextResponse.json({ updated: true, mode, id, targetId: newId });
       }
-      const nextPayload = { ...asRecord(task.raw_payload), deadline: targetDate, lastMoveReason: reason };
+      const nextPayload = {
+        ...asRecord(task.raw_payload),
+        deadline: targetDate,
+        taskDate: targetDate,
+        task_date: targetDate,
+        lastMoveReason: reason,
+      };
       const { data: moved, error: moveError } = await admin.from("tasks").update({
         deadline: targetDate,
+        task_date: targetDate,
         last_move_mode: "move",
         last_move_reason: reason,
         last_moved_at: new Date().toISOString(),
@@ -720,7 +869,7 @@ export async function PATCH(request: Request) {
         throw new ApiAuthError("Bạn không có quyền cập nhật trạng thái task này.", 403);
       }
       const admin = getSupabaseAdmin();
-      const { data: task, error: taskError } = await admin.from("tasks").select("*").eq("id", id).single();
+      const { data: task, error: taskError } = await admin.from("tasks").select("*").eq("id", id).is("deleted_at", null).single();
       if (taskError || !task) throw taskError ?? new ApiAuthError("Không tìm thấy task.", 404);
       if (Number(body.version) && Number(body.version) !== Number(task.version)) {
         throw new ApiAuthError("Task vừa được cập nhật. Hãy tải lại trước khi đổi trạng thái.", 409);
@@ -791,7 +940,9 @@ export async function PATCH(request: Request) {
     if (!text && !attachments.length) throw new ApiAuthError("Bình luận không được để trống.", 400);
     const admin = getSupabaseAdmin();
     const table = kind === "meeting" ? "meetings" : "tasks";
-    const { data: item } = await admin.from(table).select("id").eq("id", id).maybeSingle();
+    let itemQuery = admin.from(table).select("id").eq("id", id);
+    if (kind === "task") itemQuery = itemQuery.is("deleted_at", null);
+    const { data: item } = await itemQuery.maybeSingle();
     if (!item) throw new ApiAuthError("Công việc chưa được lưu vào Supabase. Hãy lưu lại trước khi bình luận.", 409);
     const { data: comment, error } = await admin.from("work_comments").insert({
       item_kind: kind,
@@ -827,7 +978,6 @@ export async function DELETE(request: Request) {
     const kind = url.searchParams.get("kind") === "meeting" ? "meeting" : "task";
     const id = validItemId(url.searchParams.get("id"));
     if (!(await canModify(identity, kind, id))) throw new ApiAuthError("Bạn không có quyền xóa công việc này.", 403);
-    const table = kind === "meeting" ? "meetings" : "tasks";
     if (kind === "meeting") {
       const { data: meeting } = await getSupabaseAdmin()
         .from("meetings")
@@ -835,10 +985,29 @@ export async function DELETE(request: Request) {
         .eq("id", id)
         .maybeSingle();
       if (meeting?.google_event_id) await removeGoogleCalendarMeeting(meeting.google_event_id);
+      const { error } = await getSupabaseAdmin().from("meetings").delete().eq("id", id);
+      if (error) throw error;
+      return NextResponse.json({ deleted: true, id });
     }
-    const { error } = await getSupabaseAdmin().from(table).delete().eq("id", id);
+    const deletedAt = new Date().toISOString();
+    const { data: deleted, error } = await getSupabaseAdmin()
+      .from("tasks")
+      .update({ deleted_at: deletedAt, deleted_by: identity.user.id })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
     if (error) throw error;
-    return NextResponse.json({ deleted: true, id });
+    if (!deleted) throw new ApiAuthError("Task không tồn tại hoặc đã bị xóa.", 404);
+    let historySaved = true;
+    try {
+      await insertHistory("task", id, identity, "Xóa mềm task", { deletedAt });
+    } catch {
+      // The deletion already succeeded. Do not turn an idempotent UI retry into a
+      // misleading failure solely because the secondary audit insert failed.
+      historySaved = false;
+    }
+    return NextResponse.json({ deleted: true, softDeleted: true, id, deletedAt, historySaved });
   } catch (error) {
     return apiError(error, "Không thể xóa công việc.");
   }

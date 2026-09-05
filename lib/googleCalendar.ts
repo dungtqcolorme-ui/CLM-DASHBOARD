@@ -1,17 +1,13 @@
 import "server-only";
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { createHash } from "node:crypto";
+import {
+  getGoogleAccess,
+  GOOGLE_CALENDAR_SCOPE,
+  googleConnectionStatus,
+} from "@/lib/googleOAuth";
 
-const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
-const INTEGRATION_ID = "primary";
-export const GOOGLE_OAUTH_STATE_COOKIE = "clm_google_oauth_state";
-
-type GoogleIntegrationRow = {
-  refresh_token_ciphertext: string;
-  google_account_email: string | null;
-};
 
 type CalendarEventInput = {
   id: string;
@@ -33,90 +29,13 @@ type GoogleCalendarEvent = {
   };
 };
 
-function requiredEnv(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Thiếu cấu hình ${name}.`);
-  return value;
-}
-
-function encryptionKey() {
-  return createHash("sha256").update(requiredEnv("GOOGLE_TOKEN_ENCRYPTION_KEY")).digest();
-}
-
-export function encryptGoogleToken(token: string) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return ["v1", iv.toString("base64url"), tag.toString("base64url"), encrypted.toString("base64url")].join(".");
-}
-
-function decryptGoogleToken(value: string) {
-  const [version, iv, tag, encrypted] = value.split(".");
-  if (version !== "v1" || !iv || !tag || !encrypted) throw new Error("Refresh token Google không hợp lệ.");
-  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encrypted, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
-}
-
-export function googleOAuthConfig(origin?: string) {
-  const clientId = requiredEnv("GOOGLE_CLIENT_ID");
-  const clientSecret = requiredEnv("GOOGLE_CLIENT_SECRET");
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim()
-    || (origin ? new URL("/api/google/calendar/oauth/callback", origin).toString() : "");
-  if (!redirectUri) throw new Error("Thiếu cấu hình GOOGLE_REDIRECT_URI.");
-  return { clientId, clientSecret, redirectUri };
-}
-
 export async function googleCalendarStatus() {
-  const configured = Boolean(
-    process.env.GOOGLE_CLIENT_ID
-    && process.env.GOOGLE_CLIENT_SECRET
-    && process.env.GOOGLE_TOKEN_ENCRYPTION_KEY,
-  );
-  if (!configured) return { configured: false, connected: false, accountEmail: "" };
-  const { data, error } = await getSupabaseAdmin()
-    .from("google_calendar_integrations")
-    .select("google_account_email,refresh_token_ciphertext")
-    .eq("id", INTEGRATION_ID)
-    .maybeSingle<GoogleIntegrationRow>();
-  if (error) throw error;
-  return {
-    configured: true,
-    connected: Boolean(data?.refresh_token_ciphertext),
-    accountEmail: data?.google_account_email ?? "",
-  };
+  return googleConnectionStatus();
 }
 
 async function accessToken() {
-  const { data, error } = await getSupabaseAdmin()
-    .from("google_calendar_integrations")
-    .select("refresh_token_ciphertext,google_account_email")
-    .eq("id", INTEGRATION_ID)
-    .maybeSingle<GoogleIntegrationRow>();
-  if (error) throw error;
-  if (!data?.refresh_token_ciphertext) return null;
-  const clientId = requiredEnv("GOOGLE_CLIENT_ID");
-  const clientSecret = requiredEnv("GOOGLE_CLIENT_SECRET");
-  const response = await fetch(TOKEN_ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: decryptGoogleToken(data.refresh_token_ciphertext),
-      grant_type: "refresh_token",
-    }),
-    cache: "no-store",
-  });
-  const payload = await response.json() as { access_token?: string; error_description?: string };
-  if (!response.ok || !payload.access_token) {
-    throw new Error(payload.error_description || "Không làm mới được quyền Google Calendar.");
-  }
-  return payload.access_token;
+  const access = await getGoogleAccess([GOOGLE_CALENDAR_SCOPE]);
+  return access?.accessToken ?? null;
 }
 
 function stableCalendarEventId(meetingId: string) {

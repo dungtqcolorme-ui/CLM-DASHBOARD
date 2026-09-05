@@ -16,6 +16,8 @@ export type AuthProfile = {
   roles: AppRole[];
   createdAt: string;
   updatedAt: string;
+  lastSeenAt?: string | null;
+  /** @deprecated Dashboard release v34 reads this compatibility alias. */
   lastSignInAt?: string | null;
   dateOfBirth?: string | null;
   phone?: string;

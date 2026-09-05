@@ -7,9 +7,12 @@ import {
   getDashboardRequestIdentity,
 } from "@/lib/dashboardSession";
 import { ApiAuthError } from "@/lib/serverAuth";
+import { recordLastSeenForAppLoad } from "@/lib/lastSeen";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 const COOKIE_PATH = "/api/dashboard";
 const TOKEN_CHUNK_SIZE = 3000;
+const DASHBOARD_LOAD_COOKIE = "clm_dashboard_load";
 
 const cookieOptions = {
   httpOnly: true,
@@ -28,12 +31,45 @@ function clearSession(response: NextResponse) {
   ].forEach((name) => {
     response.cookies.set(name, "", { ...cookieOptions, maxAge: 0 });
   });
+  response.cookies.set(DASHBOARD_LOAD_COOKIE, "", { ...cookieOptions, maxAge: 0, path: "/" });
 }
 
 export async function POST(request: Request) {
   try {
     const identity = await getDashboardRequestIdentity(request);
-    const response = NextResponse.json({ ok: true, activeRole: identity.activeRole });
+    const appLoadId = (request.headers.get("x-clm-app-load") ?? "").trim().slice(0, 120);
+    const previousLoadId = (request.headers.get("cookie") ?? "")
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${DASHBOARD_LOAD_COOKIE}=`))
+      ?.slice(DASHBOARD_LOAD_COOKIE.length + 1) ?? "";
+    const isNewAppLoad = !appLoadId || previousLoadId !== encodeURIComponent(appLoadId);
+    const lastSeenAt = isNewAppLoad
+      ? await recordLastSeenForAppLoad({
+        userId: identity.profile.id,
+        roles: [identity.activeRole],
+        write: async (userId, seenAt) => {
+          const { data, error } = await getSupabaseAdmin()
+            .from("profiles")
+            .update({ last_seen_at: seenAt })
+            .eq("id", userId)
+            .select("last_seen_at")
+            .single<{ last_seen_at: string }>();
+          if (error || !data?.last_seen_at) {
+            throw error ?? new Error("Không thể ghi nhận lần truy cập.");
+          }
+          return data.last_seen_at;
+        },
+      })
+      : null;
+    const sessionProfile = lastSeenAt
+      ? { ...identity.profile, lastSeenAt, lastSignInAt: lastSeenAt }
+      : identity.profile;
+    const response = NextResponse.json({
+      ok: true,
+      activeRole: identity.activeRole,
+      lastSeenAt: lastSeenAt ?? sessionProfile.lastSeenAt ?? null,
+    });
     response.cookies.set(
       DASHBOARD_TOKEN_COOKIE,
       identity.token.slice(0, TOKEN_CHUNK_SIZE),
@@ -47,9 +83,16 @@ export async function POST(request: Request) {
     response.cookies.set(DASHBOARD_ROLE_COOKIE, identity.activeRole, cookieOptions);
     response.cookies.set(
       DASHBOARD_PROFILE_COOKIE,
-      Buffer.from(JSON.stringify(identity.profile), "utf8").toString("base64url"),
+      Buffer.from(JSON.stringify(sessionProfile), "utf8").toString("base64url"),
       cookieOptions,
     );
+    if (appLoadId) {
+      response.cookies.set(DASHBOARD_LOAD_COOKIE, appLoadId, {
+        ...cookieOptions,
+        maxAge: 24 * 60 * 60,
+        path: "/",
+      });
+    }
     return response;
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;

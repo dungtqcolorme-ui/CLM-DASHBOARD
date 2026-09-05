@@ -1,75 +1,102 @@
 import { NextResponse } from "next/server";
-import { encryptGoogleToken, GOOGLE_OAUTH_STATE_COOKIE, googleOAuthConfig } from "@/lib/googleCalendar";
+import {
+  exchangeGoogleAuthorizationCode,
+  GOOGLE_OAUTH_STATE_COOKIE,
+  saveGoogleConnection,
+  verifyGoogleOAuthState,
+} from "@/lib/googleOAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
-function resultPage(title: string, message: string, ok: boolean) {
-  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#111827;display:grid;place-items:center;min-height:100vh}.card{width:min(440px,calc(100% - 32px));background:white;border:1px solid #e5e7eb;border-radius:20px;padding:32px;box-shadow:0 20px 60px rgba(15,23,42,.12);text-align:center}.icon{width:54px;height:54px;margin:auto;border-radius:50%;display:grid;place-items:center;background:${ok ? "#dcfce7" : "#fee2e2"};color:${ok ? "#166534" : "#991b1b"};font-size:26px;font-weight:800}h1{font-size:22px;margin:18px 0 8px}p{color:#64748b;line-height:1.6;margin:0}.close{margin-top:22px;border:0;border-radius:11px;padding:11px 18px;background:#e11b22;color:white;font-weight:700;cursor:pointer}</style></head><body><main class="card"><div class="icon">${ok ? "✓" : "!"}</div><h1>${title}</h1><p>${message}</p><button class="close" onclick="window.close()">Đóng cửa sổ</button></main></body></html>`;
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const state = url.searchParams.get("state") ?? "";
-  const code = url.searchParams.get("code") ?? "";
-  const cookieState = request.headers.get("cookie")
+function resultPage(title: string, message: string, ok: boolean) {
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
+  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>body{margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#111827;display:grid;place-items:center;min-height:100vh}.card{width:min(440px,calc(100% - 32px));background:white;border:1px solid #e5e7eb;border-radius:20px;padding:32px;box-shadow:0 20px 60px rgba(15,23,42,.12);text-align:center}.icon{width:54px;height:54px;margin:auto;border-radius:50%;display:grid;place-items:center;background:${ok ? "#dcfce7" : "#fee2e2"};color:${ok ? "#166534" : "#991b1b"};font-size:26px;font-weight:800}h1{font-size:22px;margin:18px 0 8px}p{color:#64748b;line-height:1.6;margin:0}.close{margin-top:22px;border:0;border-radius:11px;padding:11px 18px;background:#e11b22;color:white;font-weight:700;cursor:pointer}</style></head><body><main class="card"><div class="icon">${ok ? "✓" : "!"}</div><h1>${safeTitle}</h1><p>${safeMessage}</p><button class="close" onclick="window.close()">Đóng cửa sổ</button></main></body></html>`;
+}
+
+function oauthCookie(request: Request) {
+  const value = request.headers.get("cookie")
     ?.split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${GOOGLE_OAUTH_STATE_COOKIE}=`))
     ?.slice(GOOGLE_OAUTH_STATE_COOKIE.length + 1) ?? "";
   try {
-    if (!state || !cookieState || state !== decodeURIComponent(cookieState)) {
-      throw new Error("Phiên kết nối Google không hợp lệ hoặc đã hết hạn.");
-    }
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
+}
+
+function htmlResponse(title: string, message: string, ok: boolean, status = 200) {
+  const response = new NextResponse(resultPage(title, message, ok), {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+    },
+  });
+  response.cookies.delete(GOOGLE_OAUTH_STATE_COOKIE);
+  return response;
+}
+
+async function assertManagerStillAuthorized(userId: string) {
+  const admin = getSupabaseAdmin();
+  const [{ data: profile, error: profileError }, { data: roles, error: rolesError }] = await Promise.all([
+    admin.from("profiles").select("status").eq("id", userId).maybeSingle<{ status: string }>(),
+    admin.from("user_roles").select("role").eq("user_id", userId).in("role", ["Admin", "PR Leader"]),
+  ]);
+  if (profileError || rolesError) throw new Error("Không xác minh được quyền quản trị Google.");
+  if (profile?.status !== "active" || !(roles ?? []).length) {
+    throw new Error("Tài khoản không còn quyền kết nối Google cho hệ thống.");
+  }
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const returnedState = url.searchParams.get("state") ?? "";
+  try {
+    const verifiedState = verifyGoogleOAuthState(oauthCookie(request), returnedState);
+    if (!verifiedState) throw new Error("Phiên kết nối Google không hợp lệ hoặc đã hết hạn.");
+    await assertManagerStillAuthorized(verifiedState.userId);
+    const code = url.searchParams.get("code") ?? "";
     if (!code) throw new Error(url.searchParams.get("error_description") || "Google không trả về mã xác thực.");
-    const { clientId, clientSecret, redirectUri } = googleOAuthConfig(url.origin);
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: redirectUri,
-      }),
-      cache: "no-store",
-    });
-    const tokens = await tokenResponse.json() as {
-      access_token?: string;
-      refresh_token?: string;
-      error_description?: string;
-    };
-    if (!tokenResponse.ok || !tokens.access_token || !tokens.refresh_token) {
-      throw new Error(tokens.error_description || "Google không cấp refresh token. Hãy thử kết nối lại.");
-    }
+
+    const tokens = await exchangeGoogleAuthorizationCode(code, url.origin);
     const userInfoResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
       cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
     });
     const userInfo = await userInfoResponse.json().catch(() => ({})) as { email?: string };
-    const { error } = await getSupabaseAdmin().from("google_calendar_integrations").upsert({
-      id: "primary",
-      google_account_email: userInfo.email ?? "",
-      refresh_token_ciphertext: encryptGoogleToken(tokens.refresh_token),
-      scopes: ["https://www.googleapis.com/auth/calendar.events"],
-      updated_at: new Date().toISOString(),
+    if (!userInfoResponse.ok || !userInfo.email) throw new Error("Không đọc được email tài khoản Google.");
+
+    await saveGoogleConnection({
+      accountEmail: userInfo.email,
+      refreshToken: tokens.refreshToken,
+      scopes: tokens.scopes,
+      connectedBy: verifiedState.userId,
     });
-    if (error) throw error;
-    const response = new NextResponse(
-      resultPage("Đã kết nối Google Calendar", "Bạn có thể đóng cửa sổ này. Các cuộc họp mới sẽ tự tạo Google Meet.", true),
-      { headers: { "Content-Type": "text/html; charset=utf-8" } },
+    return htmlResponse(
+      "Đã kết nối Google",
+      "Google Calendar, Google Meet và Gmail đã sẵn sàng. Bạn có thể đóng cửa sổ này.",
+      true,
     );
-    response.cookies.delete(GOOGLE_OAUTH_STATE_COOKIE);
-    return response;
   } catch (error) {
-    const response = new NextResponse(
-      resultPage(
-        "Chưa kết nối được Google Calendar",
-        error instanceof Error ? error.message : "Vui lòng thử lại.",
-        false,
-      ),
-      { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } },
+    return htmlResponse(
+      "Chưa kết nối được Google",
+      error instanceof Error ? error.message : "Vui lòng thử lại.",
+      false,
+      400,
     );
-    response.cookies.delete(GOOGLE_OAUTH_STATE_COOKIE);
-    return response;
   }
 }

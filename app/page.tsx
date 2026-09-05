@@ -14,6 +14,7 @@ const STATE_CACHE_URL = "/__clm_private/state-main-v1";
 const CACHE_TIMEOUT_MS = 3_000;
 const DASHBOARD_BOOT_TIMEOUT_MS = 40_000;
 const STATE_DOWNLOAD_TIMEOUT_MS = 30_000;
+const PROFILE_CACHE_TTL_MS = 5 * 60_000;
 
 type DashboardRpcMessage = {
   type: "clm-dashboard-rpc";
@@ -37,19 +38,46 @@ type DashboardRpcMessage = {
     | "delete-notifications"
     | "reschedule-work-item"
     | "update-work-status"
+    | "duplicate-work-item"
+    | "load-mentor-trainees"
+    | "load-mentor-daily-tasks"
+    | "assign-mentor-trainee"
+    | "revoke-mentor-trainee"
     | "get-account-profile"
     | "update-account-profile"
     | "change-password"
     | "upload-avatar"
     | "delete-avatar"
+    | "cancel-profile-request"
     | "get-google-calendar-status"
-    | "connect-google-calendar";
+    | "connect-google-calendar"
+    | "disconnect-google"
+    | "list-documents"
+    | "create-document"
+    | "update-document"
+    | "delete-document"
+    | "open-document"
+    | "import-legacy-documents"
+    | "get-honors"
+    | "get-email-status"
+    | "get-email-settings"
+    | "update-email-settings"
+    | "preview-daily-email"
+    | "send-test-email"
+    | "list-email-jobs"
+    | "resend-email-job";
   payload?: Record<string, unknown>;
 };
 
 type DashboardBridgeWindow = Window & {
   __clmDashboardMessage?: (message: unknown) => void;
   __clmDashboardRpcResult?: (message: unknown) => void;
+  __CLM_BOOTSTRAP_PROFILE__?: Partial<AuthProfile>;
+};
+
+type ProfileCacheEntry = {
+  profile: AuthProfile;
+  expiresAt: number;
 };
 
 async function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, message: string): Promise<T> {
@@ -64,6 +92,36 @@ async function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, messag
   } finally {
     if (timer) window.clearTimeout(timer);
   }
+}
+
+async function fetchWithAbortTimeout(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string,
+) {
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(path, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted && !callerSignal?.aborted) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function safeStorageName(name: string) {
@@ -106,20 +164,25 @@ async function readCompressedState(blob: Blob) {
   return new Response(stream).text();
 }
 
-async function authorizedApi<T>(path: string, init?: RequestInit, activeRole?: AppRole) {
+async function authorizedApi<T>(
+  path: string,
+  init?: RequestInit,
+  activeRole?: AppRole,
+  timeoutMs = 20_000,
+) {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
   if (!data.session) throw new Error("Phiên đăng nhập đã hết hạn.");
 
-  const sendRequest = (accessToken: string) => withTimeout(fetch(path, {
-    ...init,
-    headers: {
-      ...(!(init?.body instanceof FormData) && !(init?.body instanceof Blob) ? { "Content-Type": "application/json" } : {}),
-      Authorization: `Bearer ${accessToken}`,
-      ...(activeRole ? { "X-CLM-Active-Role": activeRole } : {}),
-      ...(init?.headers ?? {}),
-    },
-  }), 20_000, "Kết nối máy chủ quá thời gian. Vui lòng thử lại.");
+  const sendRequest = (accessToken: string) => {
+    const headers = new Headers(init?.headers);
+    if (!(init?.body instanceof FormData) && !(init?.body instanceof Blob) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    headers.set("Authorization", `Bearer ${accessToken}`);
+    if (activeRole) headers.set("X-CLM-Active-Role", activeRole);
+    return fetchWithAbortTimeout(path, { ...init, headers }, timeoutMs, "Kết nối máy chủ quá thời gian. Vui lòng thử lại.");
+  };
   let response = await sendRequest(data.session.access_token);
   if (response.status === 401) {
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
@@ -210,22 +273,82 @@ export default function Home() {
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const lastSavedStateRef = useRef("");
   const profileRef = useRef<AuthProfile | null>(null);
+  const profileCacheRef = useRef<ProfileCacheEntry | null>(null);
+  const profileRequestRef = useRef<Promise<AuthProfile> | null>(null);
+  const profileRequestAbortRef = useRef<AbortController | null>(null);
   const activeRoleRef = useRef<AppRole | "">("");
   const dashboardFrameRef = useRef<HTMLIFrameElement>(null);
+  const appLoadIdRef = useRef("");
 
-  const loadCurrentProfile = useCallback(async () => {
-    const { profile: nextProfile } = await authorizedApi<{ profile: AuthProfile }>("/api/auth/profile");
+  const cacheProfile = useCallback((nextProfile: AuthProfile) => {
     profileRef.current = nextProfile;
+    profileCacheRef.current = {
+      profile: nextProfile,
+      expiresAt: Date.now() + PROFILE_CACHE_TTL_MS,
+    };
     setProfile(nextProfile);
     return nextProfile;
   }, []);
 
+  const loadCurrentProfile = useCallback(async ({
+    endpoint = "/api/auth/profile",
+    force = false,
+  }: {
+    endpoint?: "/api/auth/profile" | "/api/account/profile";
+    force?: boolean;
+  } = {}) => {
+    const cached = profileCacheRef.current;
+    if (!force && cached && cached.expiresAt > Date.now()) return cached.profile;
+    if (profileRequestRef.current) return profileRequestRef.current;
+
+    const controller = new AbortController();
+    profileRequestAbortRef.current = controller;
+    const request = authorizedApi<{ profile: AuthProfile }>(endpoint, {
+      signal: controller.signal,
+    }).then(({ profile: nextProfile }) => cacheProfile(nextProfile));
+    profileRequestRef.current = request;
+    try {
+      return await request;
+    } finally {
+      if (profileRequestRef.current === request) profileRequestRef.current = null;
+      if (profileRequestAbortRef.current === controller) profileRequestAbortRef.current = null;
+    }
+  }, [cacheProfile]);
+
+  const seedProfileFromDashboardBootstrap = useCallback(() => {
+    try {
+      const currentProfile = profileRef.current;
+      const bootstrap = (dashboardFrameRef.current?.contentWindow as DashboardBridgeWindow | null)
+        ?.__CLM_BOOTSTRAP_PROFILE__;
+      if (!currentProfile || !bootstrap || bootstrap.id !== currentProfile.id) return;
+      cacheProfile({
+        ...currentProfile,
+        email: typeof bootstrap.email === "string" ? bootstrap.email : currentProfile.email,
+        fullName: typeof bootstrap.fullName === "string" ? bootstrap.fullName : currentProfile.fullName,
+        dateOfBirth: typeof bootstrap.dateOfBirth === "string" || bootstrap.dateOfBirth === null
+          ? bootstrap.dateOfBirth
+          : currentProfile.dateOfBirth,
+        phone: typeof bootstrap.phone === "string" ? bootstrap.phone : currentProfile.phone,
+        avatarPath: typeof bootstrap.avatarPath === "string" ? bootstrap.avatarPath : currentProfile.avatarPath,
+        avatarUrl: typeof bootstrap.avatarUrl === "string" ? bootstrap.avatarUrl : currentProfile.avatarUrl,
+      });
+    } catch {
+      // Frame có thể chưa cùng origin trong khoảnh khắc chuyển trang; cache hiện tại vẫn hợp lệ.
+    }
+  }, [cacheProfile]);
+
   const openPrivateDashboard = useCallback(async (role: AppRole) => {
+    if (!appLoadIdRef.current) {
+      appLoadIdRef.current = typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
     await authorizedApi("/api/dashboard/session", {
       method: "POST",
       body: JSON.stringify({}),
+      headers: { "X-CLM-App-Load": appLoadIdRef.current },
     }, role);
-    setDashboardUrl(`/api/dashboard/shell?v=33&reload=${Date.now()}`);
+    setDashboardUrl(`/api/dashboard/shell?v=34&reload=${Date.now()}`);
     setDashboardFrameKey((currentKey) => currentKey + 1);
   }, []);
 
@@ -342,16 +465,49 @@ export default function Home() {
         }),
       }, requestRole);
     }
+    if (message.action === "duplicate-work-item") {
+      return authorizedApi("/api/work-items", {
+        method: "PATCH",
+        body: JSON.stringify({ ...payload, action: "duplicate-task" }),
+      }, requestRole);
+    }
+    if (message.action === "load-mentor-trainees") {
+      const params = new URLSearchParams();
+      if (typeof payload.mentorId === "string" && payload.mentorId) params.set("mentorId", payload.mentorId);
+      const suffix = params.size ? `?${params.toString()}` : "";
+      return authorizedApi(`/api/mentor/trainees${suffix}`, undefined, requestRole);
+    }
+    if (message.action === "load-mentor-daily-tasks") {
+      const params = new URLSearchParams();
+      for (const key of ["traineeId", "period", "date", "from", "to", "status", "shift"] as const) {
+        const value = payload[key];
+        if (typeof value === "string" && value) params.set(key, value);
+      }
+      return authorizedApi(`/api/mentor/daily-tasks?${params.toString()}`, undefined, requestRole);
+    }
+    if (message.action === "assign-mentor-trainee") {
+      return authorizedApi("/api/mentor/trainees", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, requestRole);
+    }
+    if (message.action === "revoke-mentor-trainee") {
+      const mentorId = typeof payload.mentorId === "string" ? payload.mentorId : "";
+      const traineeId = typeof payload.traineeId === "string" ? payload.traineeId : "";
+      if (!mentorId || !traineeId) throw new Error("Thiếu phân công Mentor–Trainee.");
+      const params = new URLSearchParams({ mentorId, traineeId });
+      return authorizedApi(`/api/mentor/trainees?${params.toString()}`, { method: "DELETE" }, requestRole);
+    }
     if (message.action === "get-account-profile") {
-      return authorizedApi("/api/account/profile", undefined, requestRole);
+      const nextProfile = await loadCurrentProfile({ endpoint: "/api/account/profile" });
+      return { profile: nextProfile };
     }
     if (message.action === "update-account-profile") {
       const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
         method: "PATCH",
         body: JSON.stringify(payload),
       }, requestRole);
-      profileRef.current = result.profile;
-      setProfile(result.profile);
+      cacheProfile(result.profile);
       return result;
     }
     if (message.action === "change-password") {
@@ -369,17 +525,21 @@ export default function Home() {
         method: "PUT",
         body: form,
       }, requestRole);
-      profileRef.current = result.profile;
-      setProfile(result.profile);
+      cacheProfile(result.profile);
       return result;
     }
     if (message.action === "delete-avatar") {
       const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
         method: "DELETE",
       }, requestRole);
-      profileRef.current = result.profile;
-      setProfile(result.profile);
+      cacheProfile(result.profile);
       return result;
+    }
+    if (message.action === "cancel-profile-request") {
+      profileRequestAbortRef.current?.abort();
+      profileRequestAbortRef.current = null;
+      profileRequestRef.current = null;
+      return { cancelled: true };
     }
     if (message.action === "get-google-calendar-status") {
       return authorizedApi("/api/google/calendar", undefined, requestRole);
@@ -389,6 +549,78 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({}),
       }, requestRole);
+    }
+    if (message.action === "disconnect-google") {
+      return authorizedApi("/api/google/calendar", { method: "DELETE" }, requestRole);
+    }
+    if (message.action === "list-documents") {
+      return authorizedApi("/api/documents", undefined, requestRole);
+    }
+    if (message.action === "import-legacy-documents") {
+      return authorizedApi("/api/documents/import-legacy", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }, requestRole);
+    }
+    if (message.action === "create-document") {
+      return authorizedApi("/api/documents", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, requestRole);
+    }
+    if (message.action === "update-document" || message.action === "delete-document" || message.action === "open-document") {
+      const id = typeof payload.id === "string" ? payload.id : "";
+      if (!id) throw new Error("Thiếu mã tài liệu.");
+      if (message.action === "open-document") {
+        return authorizedApi(`/api/documents/${encodeURIComponent(id)}/open`, undefined, requestRole);
+      }
+      const body = { ...payload };
+      delete body.id;
+      return authorizedApi(`/api/documents/${encodeURIComponent(id)}`, {
+        method: message.action === "delete-document" ? "DELETE" : "PATCH",
+        body: message.action === "delete-document" ? undefined : JSON.stringify(body),
+      }, requestRole);
+    }
+    if (message.action === "get-honors") {
+      const params = new URLSearchParams();
+      for (const key of ["periodType", "start", "end", "userId", "detailsUserId"] as const) {
+        const value = payload[key];
+        if (typeof value === "string" && value) params.set(key, value);
+      }
+      return authorizedApi(`/api/honors?${params.toString()}`, undefined, requestRole);
+    }
+    if (message.action === "get-email-status") {
+      return authorizedApi("/api/admin/email-status", undefined, requestRole);
+    }
+    if (message.action === "get-email-settings") {
+      return authorizedApi("/api/admin/email-settings", undefined, requestRole);
+    }
+    if (message.action === "update-email-settings") {
+      return authorizedApi("/api/admin/email-settings", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }, requestRole);
+    }
+    if (message.action === "preview-daily-email") {
+      return authorizedApi("/api/admin/email-preview", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, requestRole);
+    }
+    if (message.action === "send-test-email") {
+      return authorizedApi("/api/admin/email-test", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, requestRole, 70_000);
+    }
+    if (message.action === "list-email-jobs") {
+      return authorizedApi("/api/admin/email-jobs?limit=50", undefined, requestRole);
+    }
+    if (message.action === "resend-email-job") {
+      return authorizedApi("/api/admin/email-jobs", {
+        method: "POST",
+        body: JSON.stringify({ action: "resend", jobId: payload.jobId }),
+      }, requestRole, 70_000);
     }
 
     if (message.action === "load-state") {
@@ -513,10 +745,15 @@ export default function Home() {
     const { error: deleteError } = await supabase.storage.from(UPLOAD_BUCKET).remove([path]);
     if (deleteError) throw deleteError;
     return { deleted: true };
-  }, []);
+  }, [cacheProfile, loadCurrentProfile]);
 
   const logout = useCallback(async () => {
     const supabase = getSupabaseClient();
+    profileRequestAbortRef.current?.abort();
+    profileRequestAbortRef.current = null;
+    profileRequestRef.current = null;
+    profileCacheRef.current = null;
+    appLoadIdRef.current = "";
     void fetch("/api/dashboard/session", { method: "DELETE" }).catch(() => undefined);
     await supabase.auth.signOut();
     setDashboardUrl("");
@@ -553,6 +790,7 @@ export default function Home() {
       try {
         const dataset = dashboardFrameRef.current?.contentDocument?.documentElement.dataset;
         if (dataset?.clmReady === "1") {
+          seedProfileFromDashboardBootstrap();
           setDashboardReady(true);
           setDashboardLoading(false);
           setDashboardBootError("");
@@ -566,7 +804,7 @@ export default function Home() {
       }
     }, 250);
     return () => window.clearInterval(timer);
-  }, [dashboardFrameKey, dashboardReady, dashboardUrl]);
+  }, [dashboardFrameKey, dashboardReady, dashboardUrl, seedProfileFromDashboardBootstrap]);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -580,6 +818,7 @@ export default function Home() {
             const currentProfile = await loadCurrentProfile();
             if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
           } catch (sessionError) {
+            if (!active || isAbortError(sessionError)) return;
             await supabase.auth.signOut();
             if (active) setError(sessionError instanceof Error ? sessionError.message : "Không thể mở dashboard.");
           }
@@ -623,6 +862,7 @@ export default function Home() {
         return;
       }
       if (data.type === "clm-dashboard-ready") {
+        seedProfileFromDashboardBootstrap();
         setDashboardReady(true);
         setDashboardLoading(false);
         setDashboardBootError("");
@@ -664,7 +904,7 @@ export default function Home() {
         delete hostWindow.__clmDashboardMessage;
       }
     };
-  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc]);
+  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, seedProfileFromDashboardBootstrap]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

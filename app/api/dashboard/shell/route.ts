@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { dashboardRole } from "@/lib/authTypes";
 import { getDashboardSessionIdentity } from "@/lib/dashboardSession";
 import { ApiAuthError } from "@/lib/serverAuth";
 
 const PRIVATE_BUCKET = "clm-dashboard-private";
+const LOCAL_DASHBOARD_RELEASE = "clm-dashboard-private-34.html";
 const DASHBOARD_RELEASES = [
   "clm-dashboard-private (33).html",
   "clm-dashboard-private (32).html",
@@ -18,6 +21,17 @@ let shellCache: { html: string; expiresAt: number } | null = null;
 
 async function loadDashboardShell(client: SupabaseClient) {
   if (shellCache && shellCache.expiresAt > Date.now()) return shellCache.html;
+
+  try {
+    const html = await readFile(
+      join(process.cwd(), "dashboard", LOCAL_DASHBOARD_RELEASE),
+      "utf8",
+    );
+    shellCache = { html, expiresAt: Date.now() + SHELL_CACHE_MS };
+    return html;
+  } catch {
+    // Storage releases remain the rollback path if the bundled file is absent.
+  }
 
   let lastError: Error | null = null;
   for (const [index, fileName] of DASHBOARD_RELEASES.entries()) {

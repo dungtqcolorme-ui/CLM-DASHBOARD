@@ -11,14 +11,18 @@ type ProfileRow = {
   status: AuthProfile["status"];
   created_at: string;
   updated_at: string;
+  last_seen_at?: string | null;
   date_of_birth?: string | null;
   phone?: string;
   avatar_path?: string;
 };
 
 export class ApiAuthError extends Error {
-  constructor(message: string, public status = 401) {
+  status: number;
+
+  constructor(message: string, status = 401) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -31,6 +35,8 @@ export function toAuthProfile(row: ProfileRow, roles: AppRole[]): AuthProfile {
     roles,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    lastSeenAt: row.last_seen_at ?? null,
+    lastSignInAt: row.last_seen_at ?? null,
     dateOfBirth: row.date_of_birth ?? null,
     phone: row.phone ?? "",
     avatarPath: row.avatar_path ?? "",
@@ -46,17 +52,21 @@ export async function getRequestIdentity(request: Request) {
   const { data: userData, error: userError } = await admin.auth.getUser(token);
   if (userError || !userData.user) throw new ApiAuthError("Phiên đăng nhập không hợp lệ.");
 
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("id,email,full_name,status,created_at,updated_at,date_of_birth,phone,avatar_path")
-    .eq("id", userData.user.id)
-    .single<ProfileRow>();
+  const [
+    { data: profile, error: profileError },
+    { data: roleRows, error: rolesError },
+  ] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,email,full_name,status,created_at,updated_at,last_seen_at,date_of_birth,phone,avatar_path")
+      .eq("id", userData.user.id)
+      .single<ProfileRow>(),
+    admin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userData.user.id),
+  ]);
   if (profileError || !profile) throw new ApiAuthError("Tài khoản chưa có hồ sơ hệ thống.", 403);
-
-  const { data: roleRows, error: rolesError } = await admin
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userData.user.id);
   if (rolesError) throw new ApiAuthError("Không thể đọc quyền tài khoản.", 503);
 
   const roles = (roleRows ?? []).map((item) => item.role).filter(isAppRole);

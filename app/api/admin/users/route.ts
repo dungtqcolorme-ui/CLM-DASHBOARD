@@ -21,6 +21,7 @@ type ProfileRow = {
   status: AuthProfile["status"];
   created_at: string;
   updated_at: string;
+  last_seen_at: string | null;
 };
 
 function apiError(error: unknown, fallback: string) {
@@ -43,14 +44,12 @@ export async function GET(request: Request) {
     const [
       { data: profiles, error: profilesError },
       { data: roleRows, error: rolesError },
-      { data: authUsers, error: authUsersError },
     ] = await Promise.all([
-      admin.from("profiles").select("id,email,full_name,status,created_at,updated_at").order("created_at"),
+      admin.from("profiles").select("id,email,full_name,status,created_at,updated_at,last_seen_at").order("created_at"),
       admin.from("user_roles").select("user_id,role"),
-      admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     ]);
-    if (profilesError || rolesError || authUsersError) {
-      throw profilesError ?? rolesError ?? authUsersError;
+    if (profilesError || rolesError) {
+      throw profilesError ?? rolesError;
     }
 
     const rolesByUser = new Map<string, AppRole[]>();
@@ -61,12 +60,10 @@ export async function GET(request: Request) {
       rolesByUser.set(row.user_id, roles);
     }
 
-    const lastSignInByUser = new Map(
-      (authUsers?.users ?? []).map((user) => [user.id, user.last_sign_in_at ?? null]),
-    );
     const users = (profiles as ProfileRow[] ?? []).map((profile) => ({
       ...toAuthProfile(profile, rolesByUser.get(profile.id) ?? []),
-      lastSignInAt: lastSignInByUser.get(profile.id) ?? null,
+      lastSeenAt: profile.last_seen_at,
+      lastSignInAt: profile.last_seen_at,
     }));
     return NextResponse.json({ users });
   } catch (error) {
@@ -128,7 +125,7 @@ export async function POST(request: Request) {
 
     const { data: profile } = await admin
       .from("profiles")
-      .select("id,email,full_name,status,created_at,updated_at")
+      .select("id,email,full_name,status,created_at,updated_at,last_seen_at")
       .eq("id", createdUserId)
       .single<ProfileRow>();
     return NextResponse.json({ user: profile ? toAuthProfile(profile, roles) : null }, { status: 201 });
