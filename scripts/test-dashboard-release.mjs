@@ -10,6 +10,12 @@ assert.ok(script, "Dashboard inline script is missing");
 assert.doesNotThrow(() => new Function(script), "Dashboard inline script has a syntax error");
 assert.ok(html.startsWith("<!doctype html>"), "Dashboard must start with a doctype");
 assert.ok(html.endsWith("</html>\n"), "Dashboard must be a complete HTML document");
+assert.equal((html.match(/id="modal-root"/g) ?? []).length, 1, "Dashboard must include one modal host");
+assert.equal((html.match(/id="toast-wrap"/g) ?? []).length, 1, "Dashboard must include one toast host");
+assert.ok(
+  html.includes("if(!host){host=document.createElement('div');host.id='modal-root'"),
+  "Modal creation must recover when its host is missing",
+);
 assert.equal(
   /window\.__CLM_BOOTSTRAP_PROFILE__\s*=/.test(html),
   false,
@@ -49,6 +55,10 @@ assert.ok(html.includes('id="uw-shift"'), "Daily Task shift selector is missing"
 assert.ok(html.includes("Chưa phân ca"), "Legacy tasks need an explicit unassigned-shift label");
 assert.ok(html.includes("Task daily của Trainee"), "Mentor read-only tracking panel is missing");
 assert.ok(html.includes("load-mentor-daily-tasks"), "Mentor task scope must be loaded through the server API");
+assert.ok(
+  html.includes("if(!clmMentorState.attempted&&!clmMentorState.loading)"),
+  "Mentor loading failures must not trigger a render retry loop",
+);
 assert.ok(html.includes("Chưa truy cập"), "Account activity needs a never-seen fallback");
 assert.equal(
   html.includes("email==='dungtq.colorme@gmail.com'?'Qu. Dũng'"),

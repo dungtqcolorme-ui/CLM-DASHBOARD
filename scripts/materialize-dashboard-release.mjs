@@ -28,6 +28,11 @@ const loadingRoot = [
   "</div>",
 ].join("");
 
+const layerRoots = [
+  '<div id="modal-root"></div>',
+  '<div id="toast-wrap" role="status" aria-live="polite" aria-atomic="true"></div>',
+].join("");
+
 function sanitizeCapturedHead(head) {
   return head
     // Browser tools/extensions can mutate the live document before it is saved.
@@ -45,6 +50,7 @@ function sanitizeCapturedHead(head) {
 const withoutRenderedState = [
   sanitizeCapturedHead(captured.slice(0, rootStart)),
   loadingRoot,
+  layerRoots,
   "\n",
   captured.slice(mainScriptStart, mainScriptEnd),
   "\n</body>\n</html>",
