@@ -6,7 +6,6 @@ import {
   type AppRole,
   type AuthProfile,
   isAppRole,
-  isProfileStatus,
 } from "@/lib/authTypes";
 import { ApiAuthError, toAuthProfile } from "@/lib/serverAuth";
 
@@ -91,50 +90,7 @@ export async function getDashboardSessionIdentity() {
   if (!token) throw new ApiAuthError("Thiếu phiên đăng nhập.");
 
   const activeRole = cookieStore.get(DASHBOARD_ROLE_COOKIE)?.value ?? "";
-  const encodedProfile = cookieStore.get(DASHBOARD_PROFILE_COOKIE)?.value ?? "";
-  let profile: AuthProfile;
-  try {
-    const parsed = JSON.parse(Buffer.from(encodedProfile, "base64url").toString("utf8")) as Partial<AuthProfile>;
-    const roles = Array.isArray(parsed.roles) ? parsed.roles.filter(isAppRole) : [];
-    if (
-      typeof parsed.id !== "string"
-      || typeof parsed.email !== "string"
-      || typeof parsed.fullName !== "string"
-      || !isProfileStatus(parsed.status)
-      || typeof parsed.createdAt !== "string"
-      || typeof parsed.updatedAt !== "string"
-      || !roles.length
-    ) {
-      throw new Error("Invalid dashboard profile.");
-    }
-    profile = {
-      id: parsed.id,
-      email: parsed.email,
-      fullName: parsed.fullName,
-      status: parsed.status,
-      roles,
-      createdAt: parsed.createdAt,
-      updatedAt: parsed.updatedAt,
-      lastSeenAt: typeof parsed.lastSeenAt === "string" ? parsed.lastSeenAt : null,
-      lastSignInAt: typeof parsed.lastSeenAt === "string"
-        ? parsed.lastSeenAt
-        : typeof parsed.lastSignInAt === "string" ? parsed.lastSignInAt : null,
-      dateOfBirth: typeof parsed.dateOfBirth === "string" ? parsed.dateOfBirth : null,
-      phone: typeof parsed.phone === "string" ? parsed.phone : "",
-      avatarPath: typeof parsed.avatarPath === "string" ? parsed.avatarPath : "",
-    };
-  } catch {
-    throw new ApiAuthError("Phiên dashboard chưa sẵn sàng.");
-  }
-  if (profile.status !== "active") throw new ApiAuthError("Tài khoản không hoạt động.", 403);
-
-  const selectedRole = isAppRole(activeRole) && profile.roles.includes(activeRole)
-    ? activeRole
-    : profile.roles[0];
-  return {
-    token,
-    client: createDashboardUserClient(token),
-    profile,
-    activeRole: selectedRole,
-  };
+  // A cookie snapshot cannot prove that an account still has access.
+  // Recheck Auth, status and roles for every private shell/state request.
+  return getDashboardIdentity(token, activeRole);
 }

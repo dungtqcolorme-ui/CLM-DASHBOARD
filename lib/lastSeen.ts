@@ -1,5 +1,5 @@
-// In the current role model, PR Leader is the Mentor/management role.
-export const LAST_SEEN_TRACKED_ROLES = ["Admin", "PR Leader"] as const;
+// Every authenticated application role records access, including trainees/viewers.
+export const LAST_SEEN_TRACKED_ROLES = ["Admin", "PR Leader", "PR Representative", "Viewer"] as const;
 
 const trackedRoles = new Set<string>(LAST_SEEN_TRACKED_ROLES);
 

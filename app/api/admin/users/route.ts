@@ -98,6 +98,7 @@ export async function POST(request: Request) {
       email,
       password,
       email_confirm: true,
+      ban_duration: status === "active" ? "none" : "876000h",
       user_metadata: { full_name: fullName },
       app_metadata: { roles, status },
     });
@@ -117,7 +118,8 @@ export async function POST(request: Request) {
     });
     if (profileError) throw profileError;
 
-    await admin.from("user_roles").delete().eq("user_id", createdUserId);
+    const { error: clearRolesError } = await admin.from("user_roles").delete().eq("user_id", createdUserId);
+    if (clearRolesError) throw clearRolesError;
     const { error: rolesError } = await admin.from("user_roles").insert(
       roles.map((role) => ({ user_id: createdUserId, role })),
     );

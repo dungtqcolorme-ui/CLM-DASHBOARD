@@ -31,6 +31,7 @@ type DashboardRpcMessage = {
     | "update-user"
     | "delete-user"
     | "load-work-items"
+    | "load-performance-scores"
     | "save-work-item"
     | "delete-work-item"
     | "add-work-comment"
@@ -423,6 +424,9 @@ export default function Home() {
 
     if (message.action === "load-work-items") {
       return authorizedApi("/api/work-items", undefined, requestRole);
+    }
+    if (message.action === "load-performance-scores") {
+      return authorizedApi("/api/performance/scores", undefined, requestRole);
     }
     if (message.action === "save-work-item") {
       return authorizedApi("/api/work-items", {

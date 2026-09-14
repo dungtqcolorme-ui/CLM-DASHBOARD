@@ -61,6 +61,33 @@ the copied task to a safe initial state.
 
 PR Leaders can review only the PR Representatives explicitly assigned to them
 through `mentor_trainees`; Admin manages those assignments. Mentor views are
-read-only and all scope checks are repeated in the server API. Admin and PR
-Leader access time is recorded once per application load in
-`profiles.last_seen_at`, while older profiles display **Chưa truy cập**.
+read-only and all scope checks are repeated in the server API. Access time for all four application roles is recorded once per application load in
+`profiles.last_seen_at`, while profiles without a recorded visit display **Chưa truy cập**.
+
+
+## Account and performance regression checks
+
+`pnpm verify` runs lint, TypeScript, unit/API regression tests, dashboard source
+checks and the production build. Its runner also works directly with
+`node scripts/verify.mjs` when npm is unavailable.
+
+Apply `supabase/migrations/20260913175631_account_access_and_load_events.sql`
+before deploying this release to another database. This additive migration is
+already applied to the connected CLM DASHBOARD project. The follow-up migration
+`20260914024352_backfill_verified_sign_in_activity.sql` restores missing old-account
+activity only from Auth’s real `last_sign_in_at`, preserving newer app loads.
+Account deactivation
+locks the existing profile and bans Auth sign-in; it preserves role assignments,
+task ownership, work history and source scores. Unlocking restores access.
+
+The score API reads the existing Google Sheet on the server and returns a
+validated course/week/person structure. Missing scores remain null. Live task
+UUIDs are matched to historical score identities where the existing name mapping
+is unambiguous; other current staff remain separate.
+
+`supabase/tests/account_access.test.sql` validates durable access events,
+duplicate loads, last-active-admin protection and private RPC permissions inside
+a transaction that rolls back. `node scripts/test-http-auth.mjs` verifies the
+private HTTP routes against a running production server (default port 3100).
+Full authenticated end-to-end tests additionally require the server-only
+`SUPABASE_SERVICE_ROLE_KEY` in `.env.local` and disposable test accounts.

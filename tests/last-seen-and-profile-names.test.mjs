@@ -10,12 +10,12 @@ import {
   resolveProfileName,
 } from "../lib/profileNames.ts";
 
-test("last seen is tracked only for actual management roles", () => {
+test("last seen is tracked for every real application role", () => {
   assert.equal(shouldRecordLastSeen(["Admin"]), true);
   assert.equal(shouldRecordLastSeen(["PR Leader"]), true);
   assert.equal(shouldRecordLastSeen(["Mentor"]), false);
-  assert.equal(shouldRecordLastSeen(["PR Representative"]), false);
-  assert.equal(shouldRecordLastSeen(["Viewer"]), false);
+  assert.equal(shouldRecordLastSeen(["PR Representative"]), true);
+  assert.equal(shouldRecordLastSeen(["Viewer"]), true);
   assert.equal(shouldRecordLastSeen(["Trainee"]), false);
 });
 
@@ -38,19 +38,19 @@ test("one app-load event performs exactly one durable last-seen write", async ()
   }]);
 });
 
-test("ordinary user app loads do not write last seen", async () => {
+test("ordinary user app loads also record durable last seen", async () => {
   let writes = 0;
   const result = await recordLastSeenForAppLoad({
     userId: "22222222-2222-4222-8222-222222222222",
     roles: ["PR Representative"],
     write: async () => {
       writes += 1;
-      return "unexpected";
+      return "2026-09-14T00:00:00.000Z";
     },
   });
 
-  assert.equal(result, null);
-  assert.equal(writes, 0);
+  assert.equal(result, "2026-09-14T00:00:00.000Z");
+  assert.equal(writes, 1);
 });
 
 test("profile name resolution follows the current name by immutable user ID", () => {
@@ -75,7 +75,7 @@ test("dashboard session is the single app-load boundary and admin list uses dura
   assert.match(sessionRoute, /roles: \[identity\.activeRole\]/);
   assert.match(sessionRoute, /x-clm-app-load/);
   assert.match(sessionRoute, /previousLoadId/);
-  assert.match(sessionRoute, /update\(\{ last_seen_at: seenAt \}\)/);
+  assert.match(sessionRoute, /rpc\("record_profile_app_load"/);
   assert.match(adminRoute, /last_seen_at/);
   assert.doesNotMatch(adminRoute, /auth\.admin\.listUsers/);
   assert.match(migration, /add column if not exists last_seen_at timestamptz/);

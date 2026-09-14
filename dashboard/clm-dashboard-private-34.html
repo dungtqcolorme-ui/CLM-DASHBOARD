@@ -2391,8 +2391,8 @@ table.tbl th,table.tbl td,table.mini-tbl th,table.mini-tbl td{line-height:1.4}
     width:100%;min-width:0;justify-content:center
   }
   .performance-staff-add,.performance-filter-compact .grow{grid-column:1/-1}
-  .performance-tabs-v6{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
-  .performance-tabs-v6 button{min-width:0;padding-inline:8px;font-size:11.5px}
+  .performance-tabs-v6{display:flex!important;overflow-x:auto}
+  .performance-tabs-v6 button{flex:0 0 auto;min-width:max-content;padding-inline:12px;font-size:11.5px}
   .performance-week-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px}
   .performance-week-cards>:last-child:nth-child(odd){grid-column:1/-1}
   .performance-honor-grid,.honor-podium,.honor-top3,.honor-components,.honor-champions,.honor-formula{grid-template-columns:1fr!important}
@@ -3142,9 +3142,15 @@ async function loadScoreRules(){
   return parseScoreRules(calcGrid,reviewGrid);
 }
 // Parse grid lồng nhau thành cấu trúc: khóa → tuần → nhân sự → {hiệu suất, năng lực, kỷ luật, giờ, tiêu chí[]}
+function scoreNumber(value){
+  if(value===null||value===undefined||String(value).trim()==='')return null;
+  const raw=String(value).trim().replace(/\s/g,'');
+  if(!/^-?\d+(?:[.,]\d+)?$/.test(raw))return null;
+  const n=Number(raw.replace(',','.'));return Number.isFinite(n)?n:null;
+}
 function parseScoreGrid(grid){
   const T=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
-  const N=v=>{const n=Number(String(v).replace(/[^\d.\-]/g,''));return Number.isFinite(n)?n:0;};
+  const N=scoreNumber;
   const isCourse=s=>/^K\d{2,3}/i.test(s); // K101, K130, K134 (2026)...
   const isWeek=s=>/^Tu[aâ]̂?n\s*\d+/i.test(s)||/^Tuần\s*\d+/i.test(s);
   const isCategory=s=>/^(Hiệu suất|Năng lực|Kỷ luật)$/i.test(s);
@@ -3181,17 +3187,17 @@ function parseScoreGrid(grid){
     const a=T(row[0]),b=T(row[1]),c=T(row[2]),d=T(row[3]),e=row[4],f=row[5],g=row[6];
     // Khóa mới
     if(a&&isCourse(a)){
-      curCourse={ten:a,weeks:[]};courses.push(curCourse);curWeek=null;curPerson=null;continue;
+      curCourse={ten:a,weeks:[]};courses.push(curCourse);curWeek=null;curPerson=null;
     }
     if(!curCourse)continue;
     // Tuần mới
     if(b&&isWeek(b)){
-      curWeek={ten:b,people:[]};curCourse.weeks.push(curWeek);curPerson=null;continue;
+      curWeek={ten:b,people:[]};curCourse.weeks.push(curWeek);curPerson=null;
     }
     // Dòng nhân sự: cột C có tên, cột F là điểm làm việc, cột G là số giờ
-    if(c&&!isCategory(c)&&curWeek&&(f!==''||g!=='')){
-      curPerson={ten:scoreCanonicalPerson(c,curCourse.ten),rawTen:c,diemLamViec:N(f),soGio:N(g),hieuSuat:0,nangLuc:0,kyLuat:0,tieuChi:[]};
-      curWeek.people.push(curPerson);continue;
+    if(c&&!isCategory(c)&&curWeek&&(T(f)!==''||T(g)!=='')){
+      curPerson={ten:scoreCanonicalPerson(c,curCourse.ten),rawTen:c,diemLamViec:N(f),soGio:N(g),hieuSuat:null,nangLuc:null,kyLuat:null,tieuChi:[]};
+      curWeek.people.push(curPerson);
     }
     // Dòng hạng mục: cột D = Hiệu suất/Năng lực/Kỷ luật, cột E = điểm
     if(d&&isCategory(d)&&curPerson){
@@ -3209,34 +3215,21 @@ function parseScoreGrid(grid){
   return courses.filter(c=>c.weeks.some(w=>w.people.length));
 }
 async function loadScoreSheet(force=false){
+  if(scoreState.promise)return scoreState.promise;
   if(scoreState.loaded&&!force)return scoreState.data;
-  if(scoreState.loading)return null;
-  scoreState.loading=true;scoreState.error='';scoreState.errorKind='';
-  try{
-    const grid=await loadScoreGrid();
-    const data=parseScoreGrid(grid);
-    scoreState.data=data;scoreState.loaded=true;scoreState.error='';
+  scoreState.loading=true;scoreState.attempted=true;scoreState.error='';scoreState.errorKind='';
+  scoreState.promise=(async()=>{
     try{
-      scoreState.rules=await loadScoreRules();
-    }catch(ruleErr){
-      console.warn('Không tải được tab cơ chế tính điểm:',ruleErr);
-      scoreState.rules=null;
-    }
-    // Tải được nhưng parse rỗng → cấu trúc sheet có thể khác kỳ vọng
-    if(!data.length)scoreState.errorKind='empty';
-    return data;
-  }catch(err){
-    const msg=err.message||String(err);
-    // Phân loại lỗi để hiển thị hướng dẫn phù hợp
-    if(err.reason==='access_denied'||/access.?denied|not publicly|OAuth/i.test(msg))scoreState.errorKind='access';
-    else if(msg==='NETWORK')scoreState.errorKind='network';
-    else if(msg==='TIMEOUT')scoreState.errorKind='timeout';
-    else scoreState.errorKind='other';
-    scoreState.error=msg;
-    return null;
-  }finally{
-    scoreState.loading=false;
-  }
+      const result=await clmRpc('load-performance-scores',{},25000);
+      if(!Array.isArray(result?.courses))throw new Error('API bảng điểm trả dữ liệu không hợp lệ.');
+      scoreState.data=result.courses;scoreState.loaded=true;scoreState.source=result.source;
+      scoreState.errorKind=result.courses.length?'':'empty';
+      return scoreState.data;
+    }catch(error){
+      scoreState.error=error?.message||'Không thể tải bảng điểm.';scoreState.errorKind='network';return null;
+    }finally{scoreState.loading=false;scoreState.promise=null;}
+  })();
+  return scoreState.promise;
 }
 
 function rowsToConfig(rows){return Object.fromEntries(rows.filter(r=>r.key).map(r=>[cleanText(r.key),r.value]));}
@@ -6792,7 +6785,7 @@ function taskCanDo(t){
 }
 function taskIsCoord(t){return t.coordination===true||t.type==='coordination'||(Array.isArray(t.collaborators)&&t.collaborators.length);}
 function taskAssigneeOptions(selected=''){
-  const list=(typeof officialStaff==='function'?officialStaff():DB.staff.filter(s=>s.role==='Staff'));
+  const list=taskStaff();
   return list.map(s=>`<option value="${esc(s.id)}" ${selected===s.id?'selected':''}>${esc(s.ten)}</option>`).join('');
 }
 function taskStatusSummary(tasks){
@@ -7318,17 +7311,17 @@ function staffName(id){
   const s=(DB.staff||[]).find(x=>x.id===id);
   return s?s.ten:id;
 }
-function taskStaff(includeManagers=false){
+function taskStaff(includeManagers=true){
   const allowedRoles=includeManagers?['Admin','PR Leader','PR Representative']:['PR Representative'];
   const seen=new Set();
-  const active=(DB.accounts||[]).filter(account=>{
+  const active=(clmTaskDirectory.length?clmTaskDirectory:(DB.accounts||[])).filter(account=>{
     const roles=Array.isArray(account?.appRoles)?account.appRoles:[clmLegacyRoleToApp(account?.role)];
     return account?.id&&account.status==='active'&&roles.some(role=>allowedRoles.includes(role));
   }).map(account=>{
     const email=String(account.email||'').toLowerCase();
     const roles=Array.isArray(account.appRoles)?account.appRoles:[];
     return {id:account.id,ten:account.ten||account.fullName||email,email,role:roles.includes('PR Representative')?'Staff':roles.includes('PR Leader')?'Leader':'Admin'};
-  }).filter(person=>person.email&&!seen.has(person.email)&&seen.add(person.email));
+  }).filter(person=>!seen.has(person.id)&&seen.add(person.id));
   if(active.length)return active;
   const ownRoles=Array.isArray(session?.authRoles)?session.authRoles:[];
   if(session?.prId&&ownRoles.some(role=>allowedRoles.includes(role)))return [{id:session.prId,ten:session.ten||session.email,email:session.email||'',role:ownRoles.includes('PR Representative')?'Staff':ownRoles.includes('PR Leader')?'Leader':'Admin'}];
@@ -7930,8 +7923,7 @@ function normalizedTaskStatus(t){
   return s==='Đang làm'?'Đang thực hiện':s;
 }
 function workItems(){
-  const activeStaffIds=new Set(taskStaff().map(person=>person.id));
-  const tasks=visibleTasks().map(t=>({kind:'task',id:t.id,type:taskIsCoord(t)?'coordination':'personal',title:cleanText(t.ten)||'Task chưa đặt tên',description:cleanText(t.description||t.note),owner:taskCanonicalOwner(t.nguoi),people:(Array.isArray(t.collaborators)?t.collaborators:[]).filter(id=>activeStaffIds.has(id)),start:t.createdAt||'',date:t.deadline||t.createdAt||'',end:t.deadline||'',status:normalizedTaskStatus(t),raw:t}));
+  const tasks=visibleTasks().map(t=>({kind:'task',id:t.id,type:taskIsCoord(t)?'coordination':'personal',title:cleanText(t.ten)||'Task chưa đặt tên',description:cleanText(t.description||t.note),owner:taskCanonicalOwner(t.nguoi),people:(Array.isArray(t.collaborators)?t.collaborators:[]),start:t.createdAt||'',date:t.deadline||t.createdAt||'',end:t.deadline||'',status:normalizedTaskStatus(t),raw:t}));
   const meetings=(DB.meetings||[]).filter(m=>{
     if(isManager())return true;
     if(isViewer())return false;
@@ -7953,7 +7945,7 @@ function workDateValue(item){return item.type==='meeting'?workDateTime(item.star
 function filteredWorkItems(){
   const st=taskHubState();let rows=workItems();
   const q=cleanText(st.q).toLowerCase();
-  if(q)rows=rows.filter(x=>`${x.title} ${x.description} ${taskStaffName(x.owner)} ${(x.raw.attendees||[]).join(' ')}`.toLowerCase().includes(q));
+  if(q)rows=rows.filter(x=>`${x.title} ${x.description} ${clmWorkCreatorName(x)} ${clmWorkPeople(x)}`.toLowerCase().includes(q));
   if(st.type!=='all')rows=rows.filter(x=>x.type===st.type);
   if(st.status!=='all')rows=rows.filter(x=>x.status===st.status);
   if(st.owner)rows=rows.filter(x=>x.owner===st.owner||x.people.includes(st.owner));
@@ -7979,6 +7971,7 @@ function startTaskDrag(event,id){clmDraggedTaskId=String(id);event.dataTransfer.
 function dropTaskOnDate(event,targetDate){event.preventDefault();event.currentTarget?.classList.remove('drag-target');const id=event.dataTransfer?.getData('text/plain')||clmDraggedTaskId;if(id)openMoveTaskModal(id,targetDate);clmDraggedTaskId='';}
 async function reloadOperationalWorkItems(){
   const result=await clmRpc('load-work-items');
+  if(Array.isArray(result?.people))clmTaskDirectory=result.people;
   const keepLocal=(items=[])=>items.filter(item=>!item.persisted);
   DB.tasks=[...keepLocal(DB.tasks),...(result?.tasks||[])];DB.meetings=[...keepLocal(DB.meetings),...(result?.meetings||[])];
   const dismissed=new Set((result?.dismissedNotificationIds||[]).map(String));DB.notifications=[...(result?.notifications||[])].filter(item=>!dismissed.has(String(item.id))).sort((a,b)=>String(b.t||'').localeCompare(String(a.t||''))).slice(0,100);
@@ -8016,8 +8009,8 @@ function renderHubCalendar(items){
 function renderHubList(items){
   return `<div class="dash-panel hub-list-card"><div class="dash-panel-head"><h3>Danh sách công việc</h3><span class="tag-pill">${fmtN(items.length)} mục</span></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Loại</th><th>Tiêu đề</th><th>Phụ trách/Tham gia</th><th>Deadline/Thời gian</th><th>Trạng thái</th><th class="right">Hành động</th></tr></thead><tbody>${items.length?items.map(x=>{const people=x.type==='meeting'?(x.raw.attendees||[]).join(', '):[taskStaffName(x.owner),...x.people.map(taskStaffName)].filter(Boolean).join(', '),mt=workDateTime(x.start);return `<tr data-record-id="${esc(x.id)}" onclick="openWorkDetail(${jsAttr(x.kind)},${jsAttr(x.id)})"><td>${workTypeBadge(x.type)}</td><td><b>${esc(x.title)}</b><div class="muted hub-list-description">${esc(x.description||'Không có mô tả')}</div></td><td>${esc(people||'—')}</td><td>${x.type==='meeting'&&mt?esc(mt.toLocaleString('vi-VN')):fmtDate(x.date)||'—'}</td><td>${workStatusBadge(x.status)}</td><td class="right">${workCanEdit(x)?`<button class="icon-btn" onclick="event.stopPropagation();openUnifiedForm(${jsAttr(x.type)},${jsAttr(x.id)})" title="Sửa">${ic('edit')}</button><button class="icon-btn" onclick="event.stopPropagation();deleteUnifiedWork(${jsAttr(x.kind)},${jsAttr(x.id)})" title="Xóa">${ic('trash')}</button>`:''}</td></tr>`;}).join(''):'<tr><td colspan="6"><div class="empty">'+ic('calendar')+'<div>Không có công việc phù hợp bộ lọc</div></div></td></tr>'}</tbody></table></div></div>`;
 }
-function unifiedStaffOptions(selected=[],multiple=false,includeManagers=false){const vals=Array.isArray(selected)?selected:[selected],base=taskStaff(includeManagers),seen=new Set(),list=base.filter(s=>s?.id&&!seen.has(s.id)&&seen.add(s.id));return list.map(s=>`<option value="${esc(s.id)}" ${vals.includes(s.id)?'selected':''}>${esc(taskStaffName(s.id)||s.ten)}</option>`).join('');}
-function unifiedStaffPicker(field,selected=[],includeManagers=false,placeholder='Chọn nhân sự'){
+function unifiedStaffOptions(selected=[],multiple=false,includeManagers=true){const vals=Array.isArray(selected)?selected:[selected],base=taskStaff(includeManagers),seen=new Set(),list=base.filter(s=>s?.id&&!seen.has(s.id)&&seen.add(s.id));return list.map(s=>`<option value="${esc(s.id)}" ${vals.includes(s.id)?'selected':''}>${esc(taskStaffName(s.id)||s.ten)}</option>`).join('');}
+function unifiedStaffPicker(field,selected=[],includeManagers=true,placeholder='Chọn nhân sự'){
   const vals=(Array.isArray(selected)?selected:[selected]).map(String),base=taskStaff(includeManagers),seen=new Set(),list=base.filter(s=>s?.id&&!seen.has(String(s.id))&&seen.add(String(s.id))),chosen=list.filter(s=>vals.includes(String(s.id))).map(s=>taskStaffName(s.id)||s.ten);
   return `<details class="staff-multi"><summary><span id="${esc(field)}-summary">${esc(chosen.join(', ')||placeholder)}</span></summary><div class="staff-multi-menu">${list.map(s=>{const name=taskStaffName(s.id)||s.ten;return `<label><input type="checkbox" name="${esc(field)}" value="${esc(s.id)}" data-name="${esc(name)}" ${vals.includes(String(s.id))?'checked':''} onchange="updateUnifiedStaffPicker(${jsAttr(field)},${jsAttr(placeholder)})"><span>${esc(name)}</span></label>`;}).join('')}</div></details>`;
 }
@@ -8057,7 +8050,7 @@ function openUnifiedForm(type='personal',id='',date='',relatedMeeting=''){
     <div class="field"><label for="uw-type">Loại công việc</label><div class="in uw-type-control"><span class="uw-type-icon" id="uw-type-icon">${ic(type==='meeting'?'calendar':type==='coordination'?'users':'clipboard')}</span><select id="uw-type" onchange="toggleUnifiedFormFields()"><option value="personal" ${type==='personal'?'selected':''}>Công việc cá nhân</option><option value="coordination" ${type==='coordination'?'selected':''}>Công việc phối hợp</option><option value="meeting" ${type==='meeting'?'selected':''}>Cuộc họp</option></select></div></div>
     <div class="field"><div class="uw-field-head"><label for="uw-title">Tiêu đề <span class="uw-required">*</span></label><span class="uw-counter" id="uw-title-count">${String(title||'').length}/120</span></div><div class="in"><input id="uw-title" maxlength="120" value="${esc(title||'')}" placeholder="Nhập tiêu đề công việc" oninput="updateUnifiedFormCounters()"></div><div class="field-error"></div></div>
     <div class="hub-form-section task-fields"><div class="field"><label for="uw-desc">Nội dung</label><div class="in"><textarea id="uw-desc" placeholder="Mô tả kết quả cần đạt...">${esc(desc||'')}</textarea></div><div class="field-error"></div></div>
-      <div class="fg"><div class="field"><label for="uw-owner">Người phụ trách</label><div class="in"><select id="uw-owner">${unifiedStaffOptions(owner)}</select></div></div><div class="field coordination-only"><label>Người phối hợp</label><div class="in">${unifiedStaffPicker('uw-collab',collabs,false,'Chọn người phối hợp')}</div></div></div>
+      <div class="fg"><div class="field"><label for="uw-assigner">Người giao task</label><div class="in"><input id="uw-assigner" value="${esc(clmWorkCreatorName(current||{createdBy:session?.prId}))}" readonly></div></div><div class="field"><label for="uw-owner">Người nhận task</label><div class="in"><select id="uw-owner">${unifiedStaffOptions(owner)}</select></div></div></div><div class="fg"><div class="field coordination-only"><label>Người phối hợp</label><div class="in">${unifiedStaffPicker('uw-collab',collabs,true,'Chọn người phối hợp')}</div></div></div>
       <div class="field"><label for="uw-deadline">Deadline</label><div class="in"><input id="uw-deadline" type="date" value="${esc(deadline)}"></div></div>
       <div class="field"><label for="uw-proof">Link minh chứng</label><div class="in"><input id="uw-proof" type="url" value="${esc(current?.proofUrl||'')}" placeholder="https://drive.google.com/..."></div><div class="field-error"></div></div>
     </div>
@@ -8202,7 +8195,7 @@ function openWorkDetail(kind,id){
     return;
   }
   modal(`<div class="modal-h"><div><h3>${esc(x.title||x.ten)}</h3><div class="task-detail-badges">${workTypeBadge(type)}${workStatusBadge(status)}</div></div><button class="icon-btn" onclick="closeModal()">${ic('x')}</button></div><div class="modal-b">
-    <div class="hub-detail-grid"><div class="hub-detail-box"><small>Phụ trách/Phối hợp</small><b>${esc(people||'—')}</b></div><div class="hub-detail-box"><small>Deadline</small><b>${esc(when)}</b></div><div class="hub-detail-box"><small>Minh chứng</small><b>${x.proofUrl?`<a href="${esc(x.proofUrl)}" target="_blank" rel="noopener">Mở link</a>`:'Chưa có'}</b></div></div>
+    <div class="hub-detail-grid"><div class="hub-detail-box"><small>Người giao task</small><b>${esc(clmWorkCreatorName(x))}</b></div><div class="hub-detail-box"><small>Người nhận task</small><b>${esc(clmWorkOwnerName(x))}</b></div>${(x.collaborators||[]).length?`<div class="hub-detail-box"><small>Người phối hợp</small><b>${esc(clmWorkCollaboratorNames(x).join(', '))}</b></div>`:''}<div class="hub-detail-box"><small>Deadline</small><b>${esc(when)}</b></div><div class="hub-detail-box"><small>Minh chứng</small><b>${x.proofUrl?`<a href="${esc(x.proofUrl)}" target="_blank" rel="noopener">Mở link</a>`:'Chưa có'}</b></div></div>
     <h4>Nội dung</h4><p class="muted" style="white-space:pre-wrap">${esc((x.description||x.note)||'—')}</p>
     <section class="task-chat"><div class="task-chat-head"><h4>Trao đổi &amp; nhật ký</h4><span>${comments.length} bình luận</span></div><div class="task-chat-stream">${comments.length?commentMessages:'<div class="task-chat-empty">Chưa có bình luận. Hãy bắt đầu trao đổi về công việc này.</div>'}</div>${commentComposer}</section>
     ${historyMarkup}
@@ -8355,7 +8348,7 @@ function honorAwards(rows){
 }
 function openHonorJourney(id){const x=honorData().find(r=>r.s.id===id);if(!x)return;modal(`<div class="modal-h"><h3>Hành trình · ${esc(x.s.ten)}</h3><button class="icon-btn" onclick="closeModal()">${ic('x')}</button></div><div class="modal-b"><div class="compact-metrics">${[['Tổng điểm',fmtScore(x.score)],['Hồ sơ',fmtN(x.events)],['Hợp đồng',fmtN(x.signed)],['Điểm Vinh danh',x.honor==null?'Chưa đủ dữ liệu':Math.round(x.honor)]].map(([l,v])=>`<div class="compact-metric"><div class="cm-label">${l}</div><div class="cm-value">${v}</div></div>`).join('')}</div><h4>Điểm theo khóa</h4>${x.courseScores.length?`<div>${x.courseScores.map(c=>{const max=Math.max(1,...x.courseScores.map(z=>z.value));return `<div style="margin:10px 0"><div class="row-between"><b>${esc(c.course)}</b><span>${fmtScore(c.value)}</span></div><div class="prog b"><div style="width:${Math.max(2,c.value/max*100)}%"></div></div></div>`;}).join('')}</div>`:'<div class="empty">'+ic('chart')+'<div>Chưa có hành trình điểm theo khóa</div></div>'}<div class="formula-note">So sánh kỳ đầu, kỳ trước và kỳ hiện tại chỉ được tính khi Sheet điểm có đủ dữ liệu tương ứng.</div></div><div class="modal-f"><button class="btn btn-primary" onclick="closeModal()">Đóng</button></div>`,'lg');}
 function renderHonors(){
-  if(!scoreState.loaded&&!scoreState.loading)loadScoreSheet(true).then(()=>render());const rows=honorData(),awards=honorAwards(rows),ranked=rows.filter(x=>x.eligible&&x.honor!=null).sort((a,b)=>b.honor-a.honor),best=awards.best;
+  if(!scoreState.attempted&&!scoreState.loading)loadScoreSheet().then(()=>render());const rows=honorData(),awards=honorAwards(rows),ranked=rows.filter(x=>x.eligible&&x.honor!=null).sort((a,b)=>b.honor-a.honor),best=awards.best;
   return `<div>${best?`<div class="honor-banner"><div class="avatar" style="width:54px;height:54px;font-size:17px">${initials(best.s.ten)}</div><div><div class="muted" style="font-size:11px">NHÂN SỰ XUẤT SẮC NHẤT</div><h3 style="margin:3px 0">${esc(best.s.ten)}</h3><div class="muted">${fmtN(best.events)} hồ sơ · ${fmtN(best.signed)} hợp đồng · ${best.completionComp==null?'Chưa có task':Math.round(best.completionComp)+'% task hoàn thành'}</div></div><div><div class="honor-score">${Math.round(best.honor)}</div><small>Điểm Vinh danh</small></div></div>`:`<div class="formula-note" style="margin-bottom:14px">Chưa có nhân sự đủ điều kiện nhận Điểm Vinh danh trong giai đoạn này.</div>`}
     <div class="honor-grid">${awards.cards.map(([title,x,why])=>`<div class="honor-card"><h4>${esc(title)}</h4><div class="winner">${x?esc(x.s.ten):'Chưa đủ dữ liệu'}</div><div class="why">${esc(why)}</div>${x?`<button class="btn btn-sm btn-ghost" style="margin-top:10px" onclick="openHonorJourney(${jsAttr(x.s.id)})">Xem hành trình</button>`:''}</div>`).join('')}</div>
     <div class="dash-panel compact-table"><div class="dash-panel-head"><h3>Bảng xếp hạng Vinh danh</h3><span class="tag-pill">${ranked.length} đủ điều kiện</span></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th>Nhân sự</th><th class="right">Điểm Vinh danh</th><th class="right">Hoàn thành</th><th class="right">Đúng hạn</th><th class="right">Nghiệp vụ</th><th class="right">Chất lượng</th><th class="right">Tiến bộ</th><th>Hành trình</th></tr></thead><tbody>${ranked.length?ranked.map((x,i)=>`<tr style="cursor:default"><td>${i+1}</td><td><b>${esc(x.s.ten)}</b></td><td class="right"><b>${Math.round(x.honor)}</b></td><td class="right">${perfMetricFmt(x.completionComp,'pct')}</td><td class="right">${perfMetricFmt(x.onTimeComp,'pct')}</td><td class="right">${perfMetricFmt(x.business,'score')}</td><td class="right">${perfMetricFmt(x.qualityComp,'score')}</td><td class="right">${perfMetricFmt(x.progressComp,'score')}</td><td><button class="btn btn-sm btn-ghost" onclick="openHonorJourney(${jsAttr(x.s.id)})">Xem</button></td></tr>`).join(''):'<tr><td colspan="9"><div class="empty">'+ic('star')+'<div>Chưa đủ dữ liệu để xếp hạng</div></div></td></tr>'}</tbody></table></div><div class="formula-note">Điểm = 30% hoàn thành + 20% đúng hạn + 20% nghiệp vụ + 15% chất lượng + 10% tiến bộ + 5% phối hợp. Thành phần thiếu được loại và trọng số còn lại tự chia lại; không gán 0 vì thiếu dữ liệu.</div></div>
@@ -8368,6 +8361,20 @@ function renderBaoCao(){
 }
 
 /* ============ FINAL APPROVED KPI / HONOR / MEDIA 2026-07-13 ============ */
+function performanceStaff(){
+  const rows=officialStaff().map(s=>({...s,taskIds:[s.id]}));
+  const people=clmTaskDirectory.length?clmTaskDirectory.filter(person=>(person.appRoles||[]).some(role=>['Admin','PR Leader','PR Representative'].includes(role))):taskStaff(true);
+  for(const person of people){
+    const key=scoreNameKey(person.ten),alias=key==='tranquangdung'?'qudung':scoreNameKey(scoreCanonicalPerson(person.ten,'K136'));
+    const match=rows.find(row=>scoreNameKey(row.ten)===alias);
+    if(match){match.taskIds.push(person.id);}else rows.push({...person,taskIds:[person.id]});
+  }
+  for(const course of scoreState.data||[])for(const week of course.weeks||[])for(const person of week.people||[]){
+    const key=scoreNameKey(person.ten);
+    if(!rows.some(row=>scoreNameKey(row.ten)===key))rows.push({id:'score:'+key,ten:person.ten,role:'Staff',taskIds:[]});
+  }
+  return rows;
+}
 function approvedCourseList(){
   const fromScore=(scoreState.data||[]).map(c=>normalizeCourse(c.ten)||scoreCourseBase(c.ten)).filter(Boolean);
   return [...new Set([...availableCourses(),...fromScore])].sort(courseCmp);
@@ -8397,16 +8404,16 @@ function approvedPreviousCourses(courses,period){
 }
 function approvedScoreRows(courses){
   const set=new Set(courses.map(normalizeCourse)),map=new Map();
-  officialStaff().forEach(s=>map.set(scoreNameKey(OFFICIAL_STAFF_LABELS[s.id]||s.ten),{work:0,workN:0,eff:0,effN:0,quality:0,qualityN:0,discipline:0,disciplineN:0,weeks:0}));
+  performanceStaff().forEach(s=>map.set(scoreNameKey(OFFICIAL_STAFF_LABELS[s.id]||s.ten),{work:0,workN:0,eff:0,effN:0,quality:0,qualityN:0,discipline:0,disciplineN:0,weeks:0}));
   (scoreState.data||[]).forEach(c=>{
     const course=normalizeCourse(c.ten)||scoreCourseBase(c.ten);
     if(set.size&&!set.has(course))return;
     (c.weeks||[]).forEach(w=>(w.people||[]).forEach(p=>{
       const name=scoreCanonicalPerson(p.ten,c.ten),x=map.get(scoreNameKey(name));if(!x)return;
-      if(Number.isFinite(Number(p.diemLamViec))){x.work+=Number(p.diemLamViec);x.workN++;}
-      if(Number.isFinite(Number(p.hieuSuat))){x.eff+=Number(p.hieuSuat);x.effN++;}
-      if(Number.isFinite(Number(p.nangLuc))){x.quality+=Number(p.nangLuc);x.qualityN++;}
-      if(Number.isFinite(Number(p.kyLuat))){x.discipline+=Number(p.kyLuat);x.disciplineN++;}
+      if(p.diemLamViec!=null&&Number.isFinite(Number(p.diemLamViec))){x.work+=Number(p.diemLamViec);x.workN++;}
+      if(p.hieuSuat!=null&&Number.isFinite(Number(p.hieuSuat))){x.eff+=Number(p.hieuSuat);x.effN++;}
+      if(p.nangLuc!=null&&Number.isFinite(Number(p.nangLuc))){x.quality+=Number(p.nangLuc);x.qualityN++;}
+      if(p.kyLuat!=null&&Number.isFinite(Number(p.kyLuat))){x.discipline+=Number(p.kyLuat);x.disciplineN++;}
       x.weeks++;
     }));
   });
@@ -8424,9 +8431,9 @@ function canonicalB2Contracts(courses=[]){
 }
 function approvedPerformanceRows(courses){
   const set=new Set(courses.map(normalizeCourse)),events=roleEvents().filter(e=>!set.size||[...set].some(c=>eventHasCourse(e,c))),contracts=canonicalB2Contracts(courses),scores=approvedScoreRows(courses),eventIds=new Set(events.map(e=>String(e.ma))),allCourses=approvedCourseList(),isAllPeriod=!set.size||courses.length>=allCourses.length;
-  return officialStaff().map(s=>{
+  return performanceStaff().map(s=>{
     const evs=events.filter(e=>e.pr===s.id),signed=contracts.filter(contract=>contract.pr===s.id).length,sc=scores.get(scoreNameKey(OFFICIAL_STAFF_LABELS[s.id]||s.ten))||{};
-    const tasks=(DB.tasks||[]).filter(t=>(t.nguoi===s.id||(t.collaborators||[]).includes(s.id))&&(isAllPeriod||t.ev&&eventIds.has(String(t.ev)))),done=tasks.filter(t=>t.xong||normalizedTaskStatus(t)==='Hoàn thành'),timedDone=done.filter(t=>t.deadline&&(t.completedAt||t.reviewAt)),onTime=timedDone.filter(t=>{const a=sheetDate(t.completedAt||t.reviewAt),b=sheetDate(t.deadline);return a&&b&&a<=new Date(b.getTime()+86400000-1);}),coord=tasks.filter(taskIsCoord),coordDone=coord.filter(t=>t.xong||normalizedTaskStatus(t)==='Hoàn thành'),taskIds=new Set(tasks.map(t=>String(t.id)));
+    const tasks=(DB.tasks||[]).filter(t=>(s.taskIds.includes(t.nguoi)||(t.collaborators||[]).some(id=>s.taskIds.includes(id)))&&(isAllPeriod||t.ev&&eventIds.has(String(t.ev)))),done=tasks.filter(t=>t.xong||normalizedTaskStatus(t)==='Hoàn thành'),timedDone=done.filter(t=>t.deadline&&(t.completedAt||t.reviewAt)),onTime=timedDone.filter(t=>{const a=sheetDate(t.completedAt||t.reviewAt),b=sheetDate(t.deadline);return a&&b&&a<=new Date(b.getTime()+86400000-1);}),coord=tasks.filter(taskIsCoord),coordDone=coord.filter(t=>t.xong||normalizedTaskStatus(t)==='Hoàn thành'),taskIds=new Set(tasks.map(t=>String(t.id)));
     const meetings=(DB.meetings||[]).filter(m=>{const ids=Array.isArray(m.participantIds)?m.participantIds:[],names=(m.attendees||[]).map(nameKey),belongs=ids.includes(s.id)||names.includes(nameKey(s.ten));return belongs&&(isAllPeriod||m.taskId&&taskIds.has(String(m.taskId)));}),meetingActions=meetings.filter(m=>cleanText(m.actions)),meetingActionsDone=meetingActions.filter(m=>m.taskId&&done.some(t=>String(t.id)===String(m.taskId)));
     return {s,events:evs.length,signed,conversion:evs.length?signed/evs.length*100:null,work:sc.workN?sc.work/sc.workN:null,efficiency:sc.effN?sc.eff/sc.effN:null,quality:sc.qualityN?sc.quality/sc.qualityN:null,discipline:sc.disciplineN?sc.discipline/sc.disciplineN:null,weeks:sc.weeks||0,taskTotal:tasks.length,taskDone:done.length,taskCompletion:tasks.length?done.length/tasks.length*100:null,onTime:timedDone.length?onTime.length/timedDone.length*100:null,coordTotal:coord.length,coordDone:coordDone.length,coordCompletion:coord.length?coordDone.length/coord.length*100:null,meetingActionTotal:meetingActions.length,meetingActionDone:meetingActionsDone.length,meetingActionCompletion:meetingActions.length?meetingActionsDone.length/meetingActions.length*100:null};
   });
@@ -8441,7 +8448,6 @@ function approvedMetricFilled(v,type='number'){return approvedMetric(v==null||!N
 function resetApprovedPerformance(){ui.performance={approvedV4:true,period:'current',course:'',staffIds:[],group:'business'};render();}
 function approvedSelectedStaff(rows){
   const st=performanceState(),valid=new Set(rows.map(x=>x.s.id));st.staffIds=(st.staffIds||[]).filter(id=>valid.has(id)).slice(0,5);
-  if(st.staffIds.length<2){const ranked=[...rows].sort((a,b)=>b.events-a.events||b.signed-a.signed||(b.work||-1)-(a.work||-1));for(const x of ranked){if(!st.staffIds.includes(x.s.id))st.staffIds.push(x.s.id);if(st.staffIds.length===3)break;}}
   return rows.filter(x=>st.staffIds.includes(x.s.id));
 }
 function approvedGroupedChart(rows,series){
@@ -8962,6 +8968,8 @@ normalizeDB=function(){
   }));
 };
 let clmSupabaseProfiles=[];
+let clmTaskDirectory=[];
+const clmAccountsRemote={loading:false,attempted:false,error:'',promise:null};
 function clmAppRoleToLegacy(role){
   return role==='PR Leader'?'Leader':role==='PR Representative'?'Staff':role;
 }
@@ -8977,8 +8985,12 @@ function clmRoleBadges(account){
   return roles.map(role=>'<span class="badge '+accountBadge(clmAppRoleToLegacy(role))+'">'+esc(role)+'</span>').join(' ');
 }
 function clmGrantableRoles(){
-  const own=session?.authRoles||[];
+  const own=[session?.activeAppRole];
   return own.includes('Admin')?['Admin','PR Leader','PR Representative','Viewer']:['PR Representative','Viewer'];
+}
+function clmCanManageAccount(account){
+  if(!account)return false;
+  return session?.activeAppRole==='Admin'||(session?.activeAppRole==='PR Leader'&&!(account.appRoles||[]).some(role=>['Admin','PR Leader'].includes(role)));
 }
 function clmRoleChecks(name,selected){
   return clmGrantableRoles().map(role=>'<label class="check" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" name="'+esc(name)+'" value="'+esc(role)+'" '+((selected||[]).includes(role)?'checked':'')+'><span>'+esc(role)+'</span></label>').join('');
@@ -8988,9 +9000,13 @@ function clmCheckedRoles(root,name){
 }
 async function refreshSupabaseAccounts(){
   if(!isManager())return [];
+  if(clmAccountsRemote.promise)return clmAccountsRemote.promise;
+  clmAccountsRemote.loading=true;clmAccountsRemote.attempted=true;clmAccountsRemote.error='';
+  clmAccountsRemote.promise=(async()=>{try{
   const result=await clmRpc('list-users');
   const users=Array.isArray(result?.users)?result.users:[];
   clmSupabaseProfiles=users;
+  clmTaskDirectory=users.map(user=>({id:user.id,ten:user.fullName,status:user.status,appRoles:user.roles,email:user.email}));
   DB.accounts=users.map(user=>{
     const appRoles=Array.isArray(user.roles)?user.roles:[];
     const staff=(DB.staff||[]).find(person=>String(person.id)===String(user.id));if(staff)staff.ten=user.fullName||staff.ten;
@@ -9006,6 +9022,10 @@ async function refreshSupabaseAccounts(){
     appRoles:account.appRoles,status:'pending',t:account.taoNgay
   }));
   return users;
+  }catch(error){clmAccountsRemote.error=error?.message||'Không thể tải tài khoản.';throw error;}
+  finally{clmAccountsRemote.loading=false;clmAccountsRemote.promise=null;}
+  })();
+  return clmAccountsRemote.promise;
 }
 function rolePopover(){
   const roles=session?.authRoles||[];
@@ -9016,6 +9036,10 @@ function rolePopover(){
 }
 function renderTaiKhoan(){
   if(!isManager())return '<div class="card"><div class="empty">'+ic('lock')+'<div>Chỉ PR Leader hoặc Admin được truy cập</div></div></div>';
+  if(!clmAccountsRemote.attempted)void refreshSupabaseAccounts().finally(()=>render()).catch(()=>{});
+  if(clmAccountsRemote.loading)return '<div class="empty" role="status">Đang tải danh sách tài khoản…</div>';
+  if(clmAccountsRemote.error)return `<div class="empty" role="alert"><div><b>Không thể tải tài khoản</b><p>${esc(clmAccountsRemote.error)}</p><button class="btn btn-primary" onclick="refreshSupabaseAccounts().finally(render).catch(()=>{})">Thử lại</button></div></div>`;
+
   const pending=(DB.accounts||[]).filter(account=>account.status==='pending');
   if(!ui.taikhoan||!['ds','yc'].includes(ui.taikhoan.tab))ui.taikhoan={tab:pending.length?'yc':'ds'};
   const tab=ui.taikhoan.tab;
@@ -9034,13 +9058,14 @@ function renderTaiKhoan(){
     const rows=(DB.accounts||[]).length?DB.accounts.map((account,index)=>{
       const statusMap={active:['b-done','Hoạt động'],pending:['b-warn','Chờ duyệt'],locked:['b-late','Đã khóa']};
       const status=statusMap[account.status]||['b-neutral',account.status||'—'];
+      const canManage=clmCanManageAccount(account),canChangeAccess=canManage&&account.id!==session.prId;
       return '<tr style="cursor:default"><td><div class="ppl"><div class="avatar">'+initials(account.ten)+'</div><b>'+esc(account.ten)+'</b></div></td>'+
         '<td>'+esc(account.email)+'</td><td><div class="row gap8" style="flex-wrap:wrap">'+clmRoleBadges(account)+'</div></td>'+
         '<td><span class="badge '+status[0]+'">'+esc(status[1])+'</span></td><td class="account-time">'+esc(account.taoNgay||'—')+'</td><td class="account-time">'+esc(account.truyCapGanNhat||'Chưa truy cập')+'</td>'+
-        '<td class="right"><button class="icon-btn" onclick="editAccountAt('+index+')" title="Sửa hồ sơ và vai trò">'+ic('edit')+'</button>'+
-        ((session?.authRoles||[]).includes('Admin')?'<button class="icon-btn" onclick="resetPw('+jsAttr(account.id)+')" title="Thay đổi mật khẩu" aria-label="Thay đổi mật khẩu cho '+esc(account.email)+'">'+ic('password')+'</button>':'')+
-        '<button class="icon-btn" onclick="lockAccountAt('+index+')" title="'+(account.status==='locked'?'Mở khóa':'Khóa tài khoản')+'">'+ic(account.status==='locked'?'unlock':'lock')+'</button>'+
-        ((session?.authRoles||[]).includes('Admin')?'<button class="icon-btn" onclick="delAccountAt('+index+')" title="Xóa khỏi Supabase Auth">'+ic('trash')+'</button>':'')+'</td></tr>';
+        '<td class="right">'+(canManage?'<button class="icon-btn" onclick="editAccountAt('+index+')" title="Sửa hồ sơ và vai trò">'+ic('edit')+'</button>':'')+
+        (session?.activeAppRole==='Admin'?'<button class="icon-btn" onclick="resetPw('+jsAttr(account.id)+')" title="Thay đổi mật khẩu" aria-label="Thay đổi mật khẩu cho '+esc(account.email)+'">'+ic('password')+'</button>':'')+
+        (canChangeAccess?'<button class="icon-btn" onclick="lockAccountAt('+index+')" title="'+(account.status==='locked'?'Mở khóa':'Khóa tài khoản')+'">'+ic(account.status==='locked'?'unlock':'lock')+'</button>':'')+
+        (canChangeAccess&&account.status!=='locked'?'<button class="icon-btn" onclick="delAccountAt('+index+')" title="Vô hiệu hóa tài khoản">'+ic('trash')+'</button>':'')+'</td></tr>';
     }).join(''):'<tr><td colspan="7"><div class="empty">'+ic('users')+'<div>Chưa có tài khoản</div></div></td></tr>';
     body='<div class="row" style="justify-content:flex-end;gap:8px;margin-bottom:12px"><button class="btn btn-ghost" onclick="refreshSupabaseAccounts().then(render).catch(error=>toast(\'Không thể tải tài khoản\',error.message,\'error\'))">'+ic('refresh')+'Làm mới</button><button class="btn btn-primary" onclick="addAccount()">'+ic('userplus')+'Thêm tài khoản</button></div>'+
       '<div class="dash-panel compact-table"><div class="dash-panel-head"><h3>Tài khoản nhân sự</h3><span class="tag-pill">'+fmtN((DB.accounts||[]).length)+' tài khoản</span></div><div class="tbl-wrap"><table class="tbl account-table-v6"><thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Thời gian tạo</th><th>Truy cập gần nhất</th><th class="right">Hành động</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
@@ -9097,7 +9122,7 @@ function editAccountAt(index){
   };
 }
 function resetPw(id){
-  if(!(session?.authRoles||[]).includes('Admin')){
+  if(session?.activeAppRole!=='Admin'){
     toast('Không đủ quyền','Chỉ Admin được thay đổi mật khẩu tài khoản.','error');
     return;
   }
@@ -9117,19 +9142,22 @@ function resetPw(id){
 }
 async function lockAccountAt(index){
   const account=DB.accounts?.[index];if(!account)return;
-  const status=account.status==='locked'?'active':'locked';
+  if(!clmCanManageAccount(account)||account.id===session.prId){toast('Không đủ quyền','Không thể thay đổi quyền truy cập của tài khoản này.','error');return;}
+  if(account.status!=='locked'){delAccountAt(index);return;}
+  const status='active';
   try{await clmRpc('update-user',{id:account.id,status});await refreshSupabaseAccounts();render();toast(status==='locked'?'Đã khóa tài khoản':'Đã mở khóa tài khoản',account.email,status==='locked'?'warn':'success')}
   catch(error){toast('Không thể đổi trạng thái',error.message,'error')}
 }
 function delAccountAt(index){
   const account=DB.accounts?.[index];if(!account)return;
-  const m=modal('<div class="modal-h"><h3>Xóa tài khoản Supabase</h3><button class="icon-btn" onclick="closeModal()">'+ic('x')+'</button></div>'+
-    '<div class="modal-b"><p>Xóa vĩnh viễn <b>'+esc(account.ten)+'</b> ('+esc(account.email)+') khỏi Supabase Auth?</p></div>'+
-    '<div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">Hủy</button><button class="btn btn-soft" style="color:var(--late);background:var(--late-bg)" id="da-ok">'+ic('trash')+'Xóa tài khoản</button></div>');
+  if(!clmCanManageAccount(account)||account.id===session.prId){toast('Không đủ quyền','Không thể vô hiệu hóa tài khoản này.','error');return;}
+  const m=modal('<div class="modal-h"><h3>Vô hiệu hóa tài khoản</h3><button class="icon-btn" onclick="closeModal()">'+ic('x')+'</button></div>'+
+    '<div class="modal-b"><p>Vô hiệu hóa tài khoản <b>'+esc(account.ten)+'</b> ('+esc(account.email)+')?</p><p>Tài khoản sẽ không thể đăng nhập hoặc sử dụng hệ thống. Task, lịch sử hoạt động và dữ liệu hiệu suất được giữ nguyên. Quản lý có thể mở khóa lại.</p></div>'+
+    '<div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">Hủy</button><button class="btn btn-soft" style="color:var(--late);background:var(--late-bg)" id="da-ok">'+ic('trash')+'Vô hiệu hóa</button></div>');
   m.querySelector('#da-ok').onclick=async()=>{
     const button=m.querySelector('#da-ok');button.disabled=true;
-    try{await clmRpc('delete-user',{id:account.id});closeModal();await refreshSupabaseAccounts();render();toast('Đã xóa tài khoản',account.email,'success')}
-    catch(error){button.disabled=false;toast('Không thể xóa tài khoản',error.message,'error')}
+    try{await clmRpc('delete-user',{id:account.id});closeModal();await refreshSupabaseAccounts();render();toast('Đã vô hiệu hóa tài khoản',account.email,'success')}
+    catch(error){button.disabled=false;toast('Không thể vô hiệu hóa tài khoản',error.message,'error')}
   };
 }
 async function approveReg(index){
@@ -9232,8 +9260,9 @@ async function clmBoot(){
   if(!remoteState)save();
   if(isManager())refreshSupabaseAccounts().then(()=>{if(session&&!ui.dirtyForm)renderPageInPlace();}).catch(error=>console.warn('Không thể tải danh sách tài khoản Supabase:',error));
   clmRpc('load-work-items').then(result=>{
+    if(Array.isArray(result?.people))clmTaskDirectory=result.people;
     const merge=(legacy,remote)=>{const map=new Map((legacy||[]).map(item=>[String(item.id),item]));(remote||[]).forEach(item=>map.set(String(item.id),item));return [...map.values()];};
-    DB.tasks=merge(DB.tasks,result?.tasks);DB.meetings=merge(DB.meetings,result?.meetings);
+    DB.tasks=merge((DB.tasks||[]).filter(item=>!item.persisted),result?.tasks);DB.meetings=merge((DB.meetings||[]).filter(item=>!item.persisted),result?.meetings);
     const dismissed=new Set((result?.dismissedNotificationIds||[]).map(String));
     const notifications=merge(DB.notifications,result?.notifications).filter(item=>!dismissed.has(String(item.id))).sort((a,b)=>String(b.t||'').localeCompare(String(a.t||'')));
     DB.notifications=notifications.slice(0,100);
@@ -9309,7 +9338,7 @@ function resetApprovedPerformance(){
 function v6PerformanceRows(courses){
   const base=approvedPerformanceRows(courses),contracts=canonicalB2Contracts(courses);
   return base.map(row=>{
-    const inputScores=contracts.filter(contract=>contract.pr===row.s.id).map(contract=>asNumber(contract.inputScore)).filter(value=>value>0);
+    const inputScores=contracts.filter(contract=>contract.pr===row.s.id).map(contract=>scoreNumber(contract.inputScore)).filter(value=>value!==null);
     const inputKpi=inputScores.length?inputScores.reduce((sum,value)=>sum+value,0):null;
     return {...row,inputKpi,inputKpiRecords:inputScores.length};
   });
@@ -9324,29 +9353,32 @@ function v6PerformanceGroups(){
 function v6PerformanceFilters({staff=false}={}){
   const st=performanceState(),all=approvedCourseList(),rows=v6PerformanceRows(selectedPerformanceCourses());
   const options=all.map(course=>`<option value="${esc(course)}" ${st.course===course?'selected':''}>${esc(course)}</option>`).join('');
-  return `<div class="clm-filter-bar"><label class="clm-filter-field performance-course-filter"><span>Khóa</span><select aria-label="Chọn tất cả khóa hoặc một khóa" onchange="performanceState().course=this.value;performanceState().staffIds=[];performanceState().staffCandidate='';render()"><option value="all" ${st.course==='all'?'selected':''}>Tất cả khóa</option>${options}</select></label>${staff?`<label class="clm-filter-field"><span>Nhân sự</span><select onchange="performanceState().staff=this.value;render()"><option value="all" ${st.staff==='all'?'selected':''}>Chọn một nhân sự</option>${rows.map(row=>`<option value="${esc(row.s.id)}" ${st.staff===row.s.id?'selected':''}>${esc(row.s.ten)}</option>`).join('')}</select></label>`:''}<button class="btn btn-ghost" onclick="resetApprovedPerformance()">${ic('refresh')}Đặt lại</button></div>`;
+  return `<div class="clm-filter-bar"><label class="clm-filter-field performance-course-filter"><span>Khóa</span><select aria-label="Chọn tất cả khóa hoặc một khóa" onchange="performanceState().course=this.value;performanceState().staffCandidate='';render()"><option value="all" ${st.course==='all'?'selected':''}>Tất cả khóa</option>${options}</select></label>${staff?`<label class="clm-filter-field"><span>Nhân sự</span><select onchange="performanceState().staff=this.value;render()"><option value="all" ${st.staff==='all'?'selected':''}>Chọn một nhân sự</option>${rows.map(row=>`<option value="${esc(row.s.id)}" ${st.staff===row.s.id?'selected':''}>${esc(row.s.ten)}</option>`).join('')}</select></label>`:''}<button class="btn btn-ghost" onclick="resetApprovedPerformance()">${ic('refresh')}Đặt lại</button></div>`;
 }
 function performanceWeeklyCourses(courses,staffId){
-  const staff=officialStaff().find(item=>item.id===staffId);if(!staff)return [];
+  const staff=performanceStaff().find(item=>item.id===staffId);if(!staff)return [];
   const target=scoreNameKey(OFFICIAL_STAFF_LABELS[staff.id]||staff.ten),courseSet=new Set((courses||[]).map(normalizeCourse));
   return (scoreState.data||[]).map(course=>{
     const courseName=normalizeCourse(course.ten)||scoreCourseBase(course.ten);
     if(courseSet.size&&!courseSet.has(courseName))return null;
     const weeks=Array.from({length:4},(_,index)=>{
-      const week=(course.weeks||[]).find(item=>{const match=cleanText(item.ten).match(/\d+/);return Number(match?.[0])===index+1;})||(course.weeks||[])[index];
+      const week=(course.weeks||[]).find(item=>{const match=cleanText(item.ten).match(/\d+/);return Number(match?.[0])===index+1;});
       const person=(week?.people||[]).find(item=>scoreNameKey(scoreCanonicalPerson(item.ten,course.ten))===target);
-      return person?{label:`Tuần ${index+1}`,recorded:true,work:Number(person.diemLamViec),efficiency:Number(person.hieuSuat),quality:Number(person.nangLuc),discipline:Number(person.kyLuat),hours:Number(person.soGio)}:{label:`Tuần ${index+1}`,recorded:false,work:null,efficiency:null,quality:null,discipline:null,hours:null};
+      return person?{label:`Tuần ${index+1}`,recorded:true,work:scoreNumber(person.diemLamViec),efficiency:scoreNumber(person.hieuSuat),quality:scoreNumber(person.nangLuc),discipline:scoreNumber(person.kyLuat),hours:scoreNumber(person.soGio)}:{label:`Tuần ${index+1}`,recorded:false,work:null,efficiency:null,quality:null,discipline:null,hours:null};
     });
     if(!weeks.some(week=>week.recorded))return null;
-    const recorded=weeks.filter(week=>week.recorded),average=key=>{const values=recorded.map(week=>week[key]).filter(value=>Number.isFinite(value));return values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;};
-    return {course:courseName,weeks,totalWork:recorded.reduce((sum,week)=>sum+Number(week.work||0),0),totalHours:recorded.reduce((sum,week)=>sum+Number(week.hours||0),0),efficiency:average('efficiency'),quality:average('quality'),discipline:average('discipline'),recordedWeeks:recorded.length};
+    const recorded=weeks.filter(week=>week.recorded),sum=key=>{const values=recorded.map(week=>week[key]).filter(Number.isFinite);return values.length?values.reduce((a,b)=>a+b,0):null;},average=key=>{const values=recorded.map(week=>week[key]).filter(value=>Number.isFinite(value));return values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;};
+    return {course:courseName,weeks,totalWork:sum('work'),totalHours:sum('hours'),efficiency:average('efficiency'),quality:average('quality'),discipline:average('discipline'),recordedWeeks:recorded.length};
   }).filter(Boolean).sort((a,b)=>courseCmp(a.course,b.course));
 }
 function renderPerformanceScores(){
   const st=performanceState(),courses=selectedPerformanceCourses();
   const filters=v6PerformanceFilters({staff:true});
+  if(scoreState.loading)return `${filters}<div class="empty" role="status">Đang tải bảng điểm từ Google Sheet…</div>`;
+  if(scoreState.error)return `${filters}<div class="empty" role="alert"><div><b>Không thể tải Hiệu suất</b><p>${esc(scoreState.error)}</p><button class="btn btn-primary" onclick="refreshScore()">Thử lại</button></div></div>`;
+  if(scoreState.loaded&&!scoreState.data?.length)return `${filters}<div class="empty">Bảng điểm chưa có dữ liệu.</div>`;
   if(st.staff==='all')return `${filters}<div class="dash-panel performance-score-empty"><div class="empty">${ic('users')}<div><b>Chọn một nhân sự để xem điểm theo tuần</b><small>Hệ thống sẽ hiển thị Tuần 1–4 và cộng điểm theo từng khóa ngay tại tab này.</small></div></div></div>`;
-  const staff=officialStaff().find(item=>item.id===st.staff),months=performanceWeeklyCourses(courses,st.staff);
+  const staff=performanceStaff().find(item=>item.id===st.staff),months=performanceWeeklyCourses(courses,st.staff);
   if(!staff||!months.length)return `${filters}<div class="dash-panel performance-score-empty"><div class="empty">${ic('chart')}<div>Nhân sự chưa có dữ liệu điểm trong phạm vi khóa đã chọn.</div></div></div>`;
   const selectedMonth=st.course!=='all'&&months.length===1?months[0]:null;
   const weekCards=selectedMonth?[...selectedMonth.weeks.map((week,index)=>({label:week.label,value:week.recorded?approvedMetric(week.work,'score'):'—',sub:week.recorded?`Hiệu suất ${approvedMetric(week.efficiency,'score')} · ${approvedMetric(week.hours,'score')} giờ`:'Chưa có dữ liệu',tone:['blue','indigo','amber','green'][index]})),{label:'Cộng theo tháng',value:approvedMetric(selectedMonth.totalWork,'score'),sub:`${selectedMonth.recordedWeeks}/4 tuần · ${approvedMetric(selectedMonth.totalHours,'score')} giờ`,tone:'red'}]:[];
@@ -9366,10 +9398,12 @@ function addSelectedPerformanceStaff(){
   addApprovedPerformanceStaff(st.staffCandidate);
 }
 function renderPerformanceCompare(){
+  if(scoreState.loading)return '<div class="empty" role="status">Đang tải bảng điểm từ Google Sheet…</div>';
+  if(scoreState.error)return `<div class="empty" role="alert"><div><b>Không thể tải Hiệu suất</b><p>${esc(scoreState.error)}</p><button class="btn btn-primary" onclick="refreshScore()">Thử lại</button></div></div>`;
   const st=performanceState(),courses=selectedPerformanceCourses(),rows=v6PerformanceRows(courses),selected=approvedSelectedStaff(rows),groups=v6PerformanceGroups(),group=groups[st.group]||groups.work;
   const metrics=group.metrics.filter(([key])=>rows.some(row=>row[key]!=null)),available=rows.filter(row=>!st.staffIds.includes(row.s.id));
   if(st.staffCandidate&&!available.some(row=>row.s.id===st.staffCandidate))st.staffCandidate='';
-  return `${v6PerformanceFilters()}<div class="clm-filter-bar" style="margin-top:12px"><label class="clm-filter-field"><span>Nhóm chỉ số</span><select onchange="performanceState().group=this.value;render()">${Object.entries(groups).map(([key,value])=>`<option value="${key}" ${st.group===key?'selected':''}>${esc(value.label)}</option>`).join('')}</select></label><div class="performance-staff-add"><label class="clm-filter-field"><span>Thêm nhân sự để so sánh</span><select aria-label="Chọn nhân sự để thêm vào so sánh" onchange="performanceState().staffCandidate=this.value"><option value="">Chọn nhân sự</option>${available.map(row=>`<option value="${esc(row.s.id)}" ${st.staffCandidate===row.s.id?'selected':''}>${esc(row.s.ten)}</option>`).join('')}</select></label><button class="btn btn-primary" ${!available.length||selected.length>=5?'disabled':''} onclick="addSelectedPerformanceStaff()">${ic('plus')}Thêm</button></div></div><small class="performance-picker-note">${selected.length}/5 nhân sự đã chọn · bấm vào tên bên dưới để bỏ khỏi so sánh.</small><div class="performance-compare-picker">${selected.map(row=>`<button class="chip active" onclick="togglePerformanceStaff(${jsAttr(row.s.id)})">${ic('x')}${esc(row.s.ten)}</button>`).join('')||`<span class="muted">Chưa có nhân sự nào được chọn.</span>`}</div><div class="dash-panel" style="margin-top:14px"><div class="dash-panel-head"><h3>${esc(group.label)} · ${esc(approvedPeriodLabel(st,courses))}</h3><span class="tag-pill">${selected.length} nhân sự</span></div><div class="dash-panel-body">${selected.length?approvedGroupedChart(selected,group.chart):`<div class="empty">${ic('users')}<div>Chọn từ 2 đến 5 nhân sự để bắt đầu so sánh</div></div>`}</div></div><div class="dash-panel compact-table" style="margin-top:14px"><div class="dash-panel-head"><h3>Bảng so sánh chi tiết</h3></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nhân sự</th>${metrics.map(([,label])=>`<th class="right">${esc(label)}</th>`).join('')}</tr></thead><tbody>${selected.length?selected.map(row=>`<tr style="cursor:default"><td><div class="ppl"><div class="avatar">${initials(row.s.ten)}</div><b>${esc(row.s.ten)}</b></div></td>${metrics.map(([key,,type])=>`<td class="right">${approvedMetric(row[key],type)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${metrics.length+1}"><div class="empty">${ic('users')}<div>Chưa có nhân sự để đối chiếu</div></div></td></tr>`}</tbody></table></div></div>`;
+  return `${v6PerformanceFilters()}${st.group==='task'&&st.course!=='all'?'<p class="formula-note">Khi chọn một khóa, chỉ tính task liên kết với hồ sơ thuộc khóa đó. Chọn “Tất cả khóa” để xem cả task chưa gắn khóa.</p>':''}<div class="clm-filter-bar" style="margin-top:12px"><label class="clm-filter-field"><span>Nhóm chỉ số</span><select onchange="performanceState().group=this.value;render()">${Object.entries(groups).map(([key,value])=>`<option value="${key}" ${st.group===key?'selected':''}>${esc(value.label)}</option>`).join('')}</select></label><div class="performance-staff-add"><label class="clm-filter-field"><span>Thêm nhân sự để so sánh</span><select aria-label="Chọn nhân sự để thêm vào so sánh" onchange="performanceState().staffCandidate=this.value"><option value="">Chọn nhân sự</option>${available.map(row=>`<option value="${esc(row.s.id)}" ${st.staffCandidate===row.s.id?'selected':''}>${esc(row.s.ten)}</option>`).join('')}</select></label><button class="btn btn-primary" ${!available.length||selected.length>=5?'disabled':''} onclick="addSelectedPerformanceStaff()">${ic('plus')}Thêm</button></div></div><small class="performance-picker-note">${selected.length}/5 nhân sự đã chọn · bấm vào tên bên dưới để bỏ khỏi so sánh.</small><div class="performance-compare-picker">${selected.map(row=>`<button class="chip active" onclick="togglePerformanceStaff(${jsAttr(row.s.id)})">${ic('x')}${esc(row.s.ten)}</button>`).join('')||`<span class="muted">Chưa có nhân sự nào được chọn.</span>`}</div><div class="dash-panel" style="margin-top:14px"><div class="dash-panel-head"><h3>${esc(group.label)} · ${esc(approvedPeriodLabel(st,courses))}</h3><span class="tag-pill">${selected.length} nhân sự</span></div><div class="dash-panel-body">${selected.length?approvedGroupedChart(selected,group.chart):`<div class="empty">${ic('users')}<div>Chọn từ 2 đến 5 nhân sự để bắt đầu so sánh</div></div>`}</div></div><div class="dash-panel compact-table" style="margin-top:14px"><div class="dash-panel-head"><h3>Bảng so sánh chi tiết</h3></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nhân sự</th>${metrics.map(([,label])=>`<th class="right">${esc(label)}</th>`).join('')}</tr></thead><tbody>${selected.length?selected.map(row=>`<tr style="cursor:default"><td><div class="ppl"><div class="avatar">${initials(row.s.ten)}</div><b>${esc(row.s.ten)}</b></div></td>${metrics.map(([key,,type])=>`<td class="right">${approvedMetric(row[key],type)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${metrics.length+1}"><div class="empty">${ic('users')}<div>Chưa có nhân sự để đối chiếu</div></div></td></tr>`}</tbody></table></div></div>`;
 }
 function v6MediaCounts(courses){
   const set=new Set(courses.map(normalizeCourse)),counts=new Map(officialStaff().map(staff=>[staff.id,0]));
@@ -9409,7 +9443,7 @@ function renderHonors(){
 function renderBaoCao(){
   if(!ui.bc?.v6)ui.bc={v6:true,tab:'diemnhansu'};
   if(!['diemnhansu','sosanh','vinhdanh'].includes(ui.bc.tab))ui.bc.tab='diemnhansu';
-  if(!scoreState.loaded&&!scoreState.loading)loadScoreSheet(true).then(()=>render());
+  if(!scoreState.attempted&&!scoreState.loading)loadScoreSheet().then(()=>render());
   const tab=ui.bc.tab,tabs=`<div class="performance-tabs-v6"><button class="${tab==='diemnhansu'?'on':''}" onclick="ui.bc.tab='diemnhansu';render()"><b>01</b>${ic('chart')}Điểm nhân sự</button><button class="${tab==='sosanh'?'on':''}" onclick="ui.bc.tab='sosanh';render()"><b>02</b>${ic('users')}So sánh nhân sự</button><button class="${tab==='vinhdanh'?'on':''}" onclick="ui.bc.tab='vinhdanh';render()"><b>03</b>${ic('star')}Vinh danh</button></div>`;
   const descriptions={diemnhansu:'Xem điểm từng nhân sự theo tất cả khóa hoặc một khóa cụ thể.',sosanh:'Đặt 2–5 nhân sự cạnh nhau theo cùng nguồn dữ liệu và cùng bộ lọc khóa.',vinhdanh:'Ghi nhận người có nhiều deal, KPI đầu vào và bài truyền thông nổi bật nhất.'};
   return `<div class="performance-page">${dashHero({eyebrow:'Báo cáo',title:'Hiệu suất',desc:descriptions[tab],actions:`<button class="btn btn-ghost" onclick="refreshScore()">${ic('refresh')}Làm mới điểm</button>`})}${tabs}${tab==='diemnhansu'?renderPerformanceScores():tab==='sosanh'?renderPerformanceCompare():renderHonors()}</div>`;
@@ -9764,8 +9798,8 @@ document.head.insertAdjacentHTML('beforeend',`<style id="clm-mobile-v30">
     width:100%;min-width:0;justify-content:center
   }
   .performance-staff-add,.performance-filter-compact .grow{grid-column:1/-1}
-  .performance-tabs-v6{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
-  .performance-tabs-v6 button{min-width:0;padding-inline:8px;font-size:11.5px}
+  .performance-tabs-v6{display:flex!important;overflow-x:auto}
+  .performance-tabs-v6 button{flex:0 0 auto;min-width:max-content;padding-inline:12px;font-size:11.5px}
   .performance-week-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px}
   .performance-week-cards>:last-child:nth-child(odd){grid-column:1/-1}
   .performance-honor-grid,.honor-podium,.honor-top3,.honor-components,.honor-champions,.honor-formula{grid-template-columns:1fr!important}
@@ -9966,8 +10000,20 @@ function clmNormalizeTaskShift(value){
 function clmTaskShiftLabel(value){const shift=clmNormalizeTaskShift(value);return shift==='morning'?'Ca sáng':shift==='afternoon'?'Ca chiều':'Chưa phân ca';}
 function clmTaskShiftBadge(value){const shift=clmNormalizeTaskShift(value),tone=shift==='morning'?'morning':shift==='afternoon'?'afternoon':'unassigned';return `<span class="task-shift-badge ${tone}">${ic('clock')}${esc(clmTaskShiftLabel(shift))}</span>`;}
 function clmTaskShiftRank(value){const shift=clmNormalizeTaskShift(value);return shift==='morning'?0:shift==='afternoon'?1:2;}
-function clmWorkOwnerName(item){return item?.raw?.ownerName||taskStaffName(item?.owner)||'Chưa phân công';}
-function clmWorkPeople(item){if(item.type==='meeting')return (item.raw?.attendees||[]).join(', ');const names=[clmWorkOwnerName(item),...(item.raw?.collaboratorNames||item.people.map(taskStaffName))];return names.filter(Boolean).join(', ');}
+function clmTaskPersonName(id,fallback='',empty='Chưa có thông tin'){
+  const key=String(id||'');
+  const profile=key&&[...clmTaskDirectory,...(DB.accounts||[])].find(person=>String(person.id)===key);
+  if(profile?.ten||profile?.fullName)return profile.ten||profile.fullName;
+  if(key&&key===String(session?.prId)&&session?.ten)return session.ten;
+  if(fallback)return fallback;
+  const name=key?taskStaffName(key):'';
+  return name&&name!==key?name:empty;
+}
+function clmWorkCreatorName(item){const task=item?.raw||item;return clmTaskPersonName(task?.createdBy,task?.createdByName);}
+function clmWorkOwnerName(item){const task=item?.raw||item;return clmTaskPersonName(item?.owner||task?.nguoi,task?.ownerName,'Chưa phân công');}
+function clmWorkCollaboratorNames(item){const task=item?.raw||item;return (task?.collaborators||item?.people||[]).map((id,index)=>clmTaskPersonName(id,task?.collaboratorNames?.[index]));}
+function clmWorkPeople(item){if(item.type==='meeting')return (item.raw?.attendees||[]).join(', ');return [clmWorkOwnerName(item),...clmWorkCollaboratorNames(item)].join(', ');}
+function clmTaskAssignmentMarkup(item){return `<span class="hub-task-person"><small>Người giao</small><b>${esc(clmWorkCreatorName(item))}</b></span><span class="hub-task-person"><small>Người nhận</small><b>${esc(clmWorkOwnerName(item))}</b>${(item.people||item.raw?.collaborators||[]).length?`<small>Phối hợp: ${esc(clmWorkCollaboratorNames(item).join(', '))}</small>`:''}</span>`;}
 
 const clmBaseTaskHubState=taskHubState;
 taskHubState=function(){const state=clmBaseTaskHubState();if(!Object.prototype.hasOwnProperty.call(state,'shift'))state.shift='all';return state;};
@@ -9979,12 +10025,12 @@ filteredWorkItems=function(){const state=taskHubState();let rows=clmBaseFiltered
 workItemCard=function(item){
   const time=item.type==='meeting'&&workDateTime(item.start)?workDateTime(item.start).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}):'';
   const owner=item.type==='meeting'?(item.raw?.attendees||[])[0]:clmWorkOwnerName(item),extra=item.type==='meeting'?Math.max(0,(item.raw?.attendees||[]).length-1):Math.max(0,(item.people||[]).length),editable=item.kind==='task'&&workCanEdit(item);
-  return `<article class="hub-item ${item.type}" data-record-id="${esc(item.id)}" ${editable?`draggable="true" ondragstart="startTaskDrag(event,${jsAttr(item.id)})"`:''} onclick="openWorkDetail(${jsAttr(item.kind)},${jsAttr(item.id)})" title="${esc(item.title)}"><span class="hub-item-title">${time?esc(time)+' · ':''}${esc(item.title)}</span><span class="hub-item-assignee">${ic('users')}<b>${esc(owner||'Chưa phân công')}</b>${extra?`<em>+${extra}</em>`:''}</span><span class="hub-item-meta">${esc(workTypeLabel(item.type))} · ${esc(item.status)}</span>${item.kind==='task'?clmTaskShiftBadge(item.shift):''}${editable?`<span class="hub-item-actions"><button class="hub-move-button" onclick="event.stopPropagation();openDuplicateTaskModal(${jsAttr(item.id)})" aria-label="Nhân bản task">${ic('layers')}Nhân bản</button><button class="hub-move-button" onclick="event.stopPropagation();openMoveTaskModal(${jsAttr(item.id)})" aria-label="Đổi ngày task">${ic('calendar')}Đổi ngày</button></span>`:''}</article>`;
+  return `<article class="hub-item ${item.type}" data-record-id="${esc(item.id)}" ${editable?`draggable="true" ondragstart="startTaskDrag(event,${jsAttr(item.id)})"`:''} onclick="openWorkDetail(${jsAttr(item.kind)},${jsAttr(item.id)})" title="${esc(item.title)}"><span class="hub-item-title">${time?esc(time)+' · ':''}${esc(item.title)}</span>${item.kind==='task'?clmTaskAssignmentMarkup(item):`<span class="hub-item-assignee">${ic('users')}<b>${esc(owner||'Chưa phân công')}</b>${extra?`<em>+${extra}</em>`:''}</span>`}<span class="hub-item-meta">${esc(workTypeLabel(item.type))} · ${esc(item.status)}</span>${item.kind==='task'?clmTaskShiftBadge(item.shift):''}${editable?`<span class="hub-item-actions"><button class="hub-move-button" onclick="event.stopPropagation();openDuplicateTaskModal(${jsAttr(item.id)})" aria-label="Nhân bản task">${ic('layers')}Nhân bản</button><button class="hub-move-button" onclick="event.stopPropagation();openMoveTaskModal(${jsAttr(item.id)})" aria-label="Đổi ngày task">${ic('calendar')}Đổi ngày</button></span>`:''}</article>`;
 };
 
 renderHubList=function(items){
-  const rows=items.length?items.map(item=>{const meetingTime=workDateTime(item.start),actions=workCanEdit(item)?`${item.kind==='task'?`<button class="icon-btn" onclick="event.stopPropagation();openDuplicateTaskModal(${jsAttr(item.id)})" title="Nhân bản task" aria-label="Nhân bản task">${ic('layers')}</button>`:''}<button class="icon-btn" onclick="event.stopPropagation();openUnifiedForm(${jsAttr(item.type)},${jsAttr(item.id)})" title="Sửa" aria-label="Sửa">${ic('edit')}</button><button class="icon-btn" onclick="event.stopPropagation();deleteUnifiedWork(${jsAttr(item.kind)},${jsAttr(item.id)})" title="Xóa" aria-label="Xóa">${ic('trash')}</button>`:'';return `<tr data-record-id="${esc(item.id)}" onclick="openWorkDetail(${jsAttr(item.kind)},${jsAttr(item.id)})"><td>${workTypeBadge(item.type)}</td><td><b>${esc(item.title)}</b><div class="muted hub-list-description">${esc(item.description||'Không có mô tả')}</div></td><td>${esc(clmWorkPeople(item)||'—')}</td><td>${item.kind==='task'?clmTaskShiftBadge(item.shift):'<span class="muted">—</span>'}</td><td>${item.type==='meeting'&&meetingTime?esc(meetingTime.toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})):fmtDate(item.date)||'—'}</td><td>${workStatusBadge(item.status)}</td><td class="right hub-row-actions">${actions}</td></tr>`;}).join(''):'<tr><td colspan="7"><div class="empty">'+ic('calendar')+'<div>Không có công việc phù hợp bộ lọc</div></div></td></tr>';
-  return `<div class="dash-panel hub-list-card"><div class="dash-panel-head"><h3>Danh sách công việc</h3><span class="tag-pill">${fmtN(items.length)} mục</span></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Loại</th><th>Tiêu đề</th><th>Phụ trách/Tham gia</th><th>Ca làm việc</th><th>Deadline/Thời gian</th><th>Trạng thái</th><th class="right">Hành động</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  const rows=items.length?items.map(item=>{const meetingTime=workDateTime(item.start),actions=workCanEdit(item)?`${item.kind==='task'?`<button class="icon-btn" onclick="event.stopPropagation();openDuplicateTaskModal(${jsAttr(item.id)})" title="Nhân bản task" aria-label="Nhân bản task">${ic('layers')}</button>`:''}<button class="icon-btn" onclick="event.stopPropagation();openUnifiedForm(${jsAttr(item.type)},${jsAttr(item.id)})" title="Sửa" aria-label="Sửa">${ic('edit')}</button><button class="icon-btn" onclick="event.stopPropagation();deleteUnifiedWork(${jsAttr(item.kind)},${jsAttr(item.id)})" title="Xóa" aria-label="Xóa">${ic('trash')}</button>`:'';return `<tr data-record-id="${esc(item.id)}" onclick="openWorkDetail(${jsAttr(item.kind)},${jsAttr(item.id)})"><td>${workTypeBadge(item.type)}</td><td><b>${esc(item.title)}</b><div class="muted hub-list-description">${esc(item.description||'Không có mô tả')}</div></td><td>${esc(clmWorkCreatorName(item))}</td><td>${esc(clmWorkPeople(item)||'—')}</td><td>${item.kind==='task'?clmTaskShiftBadge(item.shift):'<span class="muted">—</span>'}</td><td>${item.type==='meeting'&&meetingTime?esc(meetingTime.toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})):fmtDate(item.date)||'—'}</td><td>${workStatusBadge(item.status)}</td><td class="right hub-row-actions">${actions}</td></tr>`;}).join(''):'<tr><td colspan="8"><div class="empty">'+ic('calendar')+'<div>Không có công việc phù hợp bộ lọc</div></div></td></tr>';
+  return `<div class="dash-panel hub-list-card"><div class="dash-panel-head"><h3>Danh sách công việc</h3><span class="tag-pill">${fmtN(items.length)} mục</span></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Loại</th><th>Tiêu đề</th><th>Người giao</th><th>Người nhận / Phối hợp</th><th>Ca làm việc</th><th>Deadline/Thời gian</th><th>Trạng thái</th><th class="right">Hành động</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 };
 
 const clmBaseOpenUnifiedForm=openUnifiedForm;
@@ -10043,6 +10089,7 @@ const clmBaseRenderPhoiHop=renderPhoiHop;
 renderPhoiHop=function(){const state=taskHubState(),shiftFilter=`<select class="hub-shift-filter" aria-label="Lọc theo ca" onchange="taskHubState().shift=this.value;render()"><option value="all">Tất cả ca</option><option value="morning" ${state.shift==='morning'?'selected':''}>Ca sáng</option><option value="afternoon" ${state.shift==='afternoon'?'selected':''}>Ca chiều</option><option value="unassigned" ${state.shift==='unassigned'?'selected':''}>Chưa phân ca</option></select>`,html=clmBaseRenderPhoiHop().replace('<div class="hub-view-switch">',shiftFilter+'<div class="hub-view-switch">'),panel=clmRenderMentorPanel(),end=html.lastIndexOf('</div>');return panel&&end>=0?html.slice(0,end)+panel+html.slice(end):html;};
 
 const clmTaskMentorStyle=document.createElement('style');clmTaskMentorStyle.textContent=`
+.hub-task-person{display:block;margin-top:6px;min-width:0;font-size:11px;line-height:1.4}.hub-task-person small{display:block;color:var(--muted);font-size:10px;overflow-wrap:anywhere}.hub-task-person b{display:block;overflow-wrap:anywhere;color:#344054}.hub-detail-box b{overflow-wrap:anywhere}
 .task-shift-badge{display:inline-flex;align-items:center;gap:5px;width:max-content;max-width:100%;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:800;line-height:1;white-space:nowrap;border:1px solid transparent}.task-shift-badge svg{width:13px;height:13px}.task-shift-badge.morning{color:#a85c00;background:#fff7dc;border-color:#f8df8d}.task-shift-badge.afternoon{color:#5b47bd;background:#f1efff;border-color:#d9d3ff}.task-shift-badge.unassigned{color:#667085;background:#f5f6f8;border-color:#e3e6ec}.hub-item>.task-shift-badge{margin-top:5px}.hub-item-actions{display:flex;gap:5px;flex-wrap:wrap}.hub-row-actions{white-space:nowrap}.duplicate-summary{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;background:#f8f9fb;margin-bottom:16px}.field-help{margin:6px 2px 0;color:var(--muted);font-size:11px}.mentor-panel{margin-top:18px;padding:18px;background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-sm)}.mentor-panel-head,.mentor-assignment-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.mentor-panel-head h3{margin:4px 0}.mentor-panel-head p,.mentor-assignment-head span{margin:0;color:var(--muted);font-size:12px}.mentor-assignment{padding:14px;margin:16px 0;border-radius:14px;background:#fafafa;border:1px solid var(--line)}.mentor-assignment-head>div{display:grid;gap:3px}.mentor-assignment-controls{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:12px}.mentor-assigned-list{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.mentor-assigned-list>span{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:999px;background:#fff;border:1px solid var(--line);font-size:11px;font-weight:700}.mentor-assigned-list button{border:0;background:transparent;color:var(--muted);padding:0;display:grid}.mentor-assigned-list svg{width:13px;height:13px}.mentor-assigned-list em{font-size:11px;color:var(--muted)}.mentor-filters{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:9px;align-items:end;margin:14px 0}.mentor-filters>div{display:grid;gap:5px}.mentor-filters label{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.mentor-filters select,.mentor-filters input,.mentor-assignment select{width:100%;min-height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:0 10px;color:var(--text);font:inherit;font-size:12px}.mentor-state{min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:7px;color:var(--muted);background:#fafbfc;border:1px dashed var(--line);border-radius:14px}.mentor-state>svg{width:28px;height:28px}.mentor-state b{color:var(--text)}.mentor-state.error>svg,.mentor-state.error b{color:var(--red)}.mentor-task-list{display:grid;gap:9px}.mentor-task-list article{padding:13px;border:1px solid var(--line);border-radius:13px;background:#fff}.mentor-task-main{display:flex;gap:12px;align-items:flex-start}.mentor-task-date{flex:0 0 auto;padding:6px 8px;border-radius:8px;background:#f4f5f7;font-size:11px;font-weight:800}.mentor-task-main>div{display:grid;gap:3px}.mentor-task-main span{font-size:11px;color:var(--muted)}.mentor-task-tags{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:10px 0}.task-progress{font-size:11px;font-weight:700;color:var(--muted)}.mentor-task-list p{margin:5px 0;color:var(--muted);font-size:12px;white-space:pre-wrap}.mentor-task-list a{display:inline-flex;gap:5px;align-items:center;font-size:11px;font-weight:700;color:var(--red)}.mentor-task-list a svg{width:13px}.hub-shift-filter{min-width:126px}
 @media(max-width:1100px){.mentor-filters{grid-template-columns:repeat(3,minmax(140px,1fr))}.mentor-assignment-controls{grid-template-columns:1fr 1fr}.mentor-assignment-controls .btn{grid-column:1/-1}}
 @media(max-width:700px){.hub-toolbar{grid-template-columns:1fr 1fr}.hub-toolbar .search,.hub-view-switch{grid-column:1/-1}.hub-shift-filter{min-width:0;width:100%}.hub-item-actions{display:grid;grid-template-columns:1fr 1fr}.hub-item-actions .hub-move-button{justify-content:center}.mentor-panel{padding:14px;margin-inline:-2px}.mentor-panel-head,.mentor-assignment-head{align-items:flex-start}.mentor-filters,.mentor-assignment-controls{grid-template-columns:1fr}.mentor-assignment-controls .btn{grid-column:auto}.mentor-task-main{flex-direction:column}.mentor-task-tags{align-items:flex-start}.duplicate-summary{align-items:flex-start}.hub-detail-grid{grid-template-columns:1fr}.modal-f .duplicate-task-detail{order:-1}.uw-shift-field{width:100%}}

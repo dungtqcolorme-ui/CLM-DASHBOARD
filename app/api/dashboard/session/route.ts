@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   DASHBOARD_PROFILE_COOKIE,
@@ -43,22 +44,17 @@ export async function POST(request: Request) {
       .map((part) => part.trim())
       .find((part) => part.startsWith(`${DASHBOARD_LOAD_COOKIE}=`))
       ?.slice(DASHBOARD_LOAD_COOKIE.length + 1) ?? "";
-    const isNewAppLoad = !appLoadId || previousLoadId !== encodeURIComponent(appLoadId);
+    const isNewAppLoad = !appLoadId || previousLoadId !== encodeURIComponent(`${identity.profile.id}:${appLoadId}`);
     const lastSeenAt = isNewAppLoad
       ? await recordLastSeenForAppLoad({
         userId: identity.profile.id,
         roles: [identity.activeRole],
-        write: async (userId, seenAt) => {
-          const { data, error } = await getSupabaseAdmin()
-            .from("profiles")
-            .update({ last_seen_at: seenAt })
-            .eq("id", userId)
-            .select("last_seen_at")
-            .single<{ last_seen_at: string }>();
-          if (error || !data?.last_seen_at) {
-            throw error ?? new Error("Không thể ghi nhận lần truy cập.");
-          }
-          return data.last_seen_at;
+        write: async (userId) => {
+          const {data,error} = await getSupabaseAdmin().rpc("record_profile_app_load", {
+            p_user_id: userId, p_load_id: appLoadId || randomUUID(),
+          });
+          if(error || typeof data!=="string") throw error ?? new Error("Không thể ghi nhận lần truy cập.");
+          return data;
         },
       })
       : null;
@@ -87,7 +83,7 @@ export async function POST(request: Request) {
       cookieOptions,
     );
     if (appLoadId) {
-      response.cookies.set(DASHBOARD_LOAD_COOKIE, appLoadId, {
+      response.cookies.set(DASHBOARD_LOAD_COOKIE, `${identity.profile.id}:${appLoadId}`, {
         ...cookieOptions,
         maxAge: 24 * 60 * 60,
         path: "/",

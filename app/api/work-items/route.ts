@@ -326,6 +326,7 @@ async function loadWorkItems(identity: Identity) {
     profileResult,
     notificationResult,
     dismissalResult,
+    rolesResult,
   ] = await Promise.all([
     admin.from("tasks").select("*").is("deleted_at", null).order("updated_at", { ascending: false }),
     admin.from("task_collaborators").select("task_id,user_id"),
@@ -336,8 +337,9 @@ async function loadWorkItems(identity: Identity) {
     admin.from("profiles").select("id,full_name,status"),
     admin.from("user_notifications").select("*").eq("recipient_id", identity.user.id).order("created_at", { ascending: false }).limit(100),
     admin.from("notification_dismissals").select("notification_key").eq("user_id", identity.user.id).limit(500),
+    admin.from("user_roles").select("user_id,role"),
   ]);
-  const firstError = [taskResult, collaboratorResult, meetingResult, participantResult, commentResult, historyResult, profileResult, notificationResult, dismissalResult]
+  const firstError = [taskResult, collaboratorResult, meetingResult, participantResult, commentResult, historyResult, profileResult, notificationResult, dismissalResult, rolesResult]
     .find((result) => result.error)?.error;
   if (firstError) throw firstError;
 
@@ -467,6 +469,12 @@ async function loadWorkItems(identity: Identity) {
     persisted: true,
   }));
   return {
+    people: (profileResult.data ?? []).map((profile) => ({
+      id: profile.id,
+      ten: profile.full_name,
+      status: profile.status,
+      appRoles: (rolesResult.data ?? []).filter((row) => row.user_id === profile.id).map((row) => row.role),
+    })),
     tasks,
     meetings,
     notifications,
