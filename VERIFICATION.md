@@ -2,9 +2,9 @@
 
 Trạng thái: code đã qua kiểm tra tự động và các luồng giao diện local bên dưới.
 Chưa nghiệm thu E2E với đăng nhập Supabase thật: `.env.local` thiếu
-`SUPABASE_SERVICE_ROLE_KEY`. Bản sửa được chuẩn bị phát hành qua GitHub → Vercel
-production theo yêu cầu triển khai của người dùng; kết quả production cần được
-kiểm tra sau khi Vercel hoàn tất.
+`SUPABASE_SERVICE_ROLE_KEY`. Đã triển khai production commit `7b00bd4` qua
+GitHub → Vercel lúc 19:06 ngày 14/09/2026 (giờ Việt Nam). Đã kiểm tra thêm
+các luồng đọc bằng phiên Admin thật trên production; phạm vi chi tiết ở cuối báo cáo.
 
 ## Nguyên nhân và thay đổi
 
@@ -78,3 +78,40 @@ lượt sửa này.
   Leader sửa task, cập nhật tên theo profile, giữ tên người nhận sau vô hiệu hóa.
 - Chạy lại toàn bộ `scripts/verify.mjs`: lint, typecheck, 54/54 test, dashboard
   release và production build đều PASS. Giới hạn E2E Auth thật ở trên vẫn áp dụng.
+
+## Xác minh sau deploy production
+
+- Commit: `7b00bd4c4cc9c64aa3570a9650470a0f5563f4d5`, đã push lên `main` và
+  `codex/task-management-overhaul`. Vercel Production deployment `6436613155`
+  (GitHub deployment ID) báo `success` lúc `2026-09-14T12:06:19Z`.
+- Website: https://clm-dashboard-eosin.vercel.app
+- Deployment: https://clm-dashboard-gmn69k9j9-tran-dung-clm.vercel.app
+- `CLM_TEST_URL=https://clm-dashboard-eosin.vercel.app node scripts/test-http-auth.mjs`:
+  PASS, trang chủ 200, 11 API riêng tư 401 và kiểm tra method tài khoản đúng kỳ vọng.
+- Phiên Admin thật tải dashboard và kết nối Sheet thành công. K141 / Qu. Dũng
+  hiển thị 26, 23.5, 25, 28; tổng 102.5 điểm, 74.5 giờ, hiệu suất TB 256.3.
+- Task thật hiển thị đúng tên người giao/người nhận trên thẻ và chi tiết.
+  Form mới có người giao Trần Quang Dũng chỉ đọc, chọn được LÊ THÀNH ĐẠT làm
+  người nhận; đã hủy form, không tạo task thử trên production.
+- Trang tài khoản hiển thị Đạt có PR Leader và đang hoạt động. Truy cập Admin
+  hiển thị `19:07:37 14/9/2026`, khớp `profiles.last_seen_at` và bản ghi
+  `profile_access_loads` trong Supabase (`2026-09-14 12:07:37.050012+00`).
+- Không ghi nhận console error/warn trong lượt kiểm tra production này.
+- Chưa chạy tạo/khóa tài khoản và gửi Google Calendar/Gmail thật trên production;
+  kết quả deploy không đồng nghĩa các luồng ghi này đã được nghiệm thu E2E.
+
+## Giao diện thẻ task theo ảnh tham chiếu
+
+- Thẻ trắng bo góc, header vàng/icon mặt trời cho ca sáng, tím/icon mặt trăng
+  cho ca chiều; task chưa phân ca dùng màu trung tính.
+- Tiêu đề xuống dòng đầy đủ. Người giao, người nhận, người phối hợp và trạng thái
+  có icon riêng; nhãn ca nằm dưới đường phân cách ở cuối thẻ.
+- Menu ba chấm thay hai nút chiếm chỗ trên thẻ: xem chi tiết, nhân bản và đổi ngày
+  (hai thao tác sửa vẫn theo quyền hiện hữu). Hỗ trợ đóng bằng Escape/nhấp ngoài
+  và mở chi tiết bằng Enter/Space trên thẻ.
+- Lịch tuần/tháng có chiều rộng cột tối thiểu và cuộn ngang khi cần để giữ chữ
+  dễ đọc. Kiểm tra giao diện local với dữ liệu cách ly ở 1440px và 390px:
+  tên/tiêu đề dài không tràn, menu mobile không bị cắt, mở đúng hộp thoại đổi ngày
+  và nhân bản; lịch tháng render đủ thẻ; không ghi nhận console error/warn.
+- Chạy `scripts/verify.mjs`: lint, typecheck, 54/54 test, dashboard release và
+  production build đều PASS cho thay đổi giao diện này.

@@ -2519,6 +2519,8 @@ html,body,button,input,select,textarea{font-family:Inter,"SF Pro Text","Segoe UI
 <script>
 /* ============ ICONS ============ */
 const ICON={
+user:'<circle cx="12" cy="7" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2Z"/>',
+more:'<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>',
 dashboard:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
 files:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 3h9l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/>',
 users:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.1a3 3 0 0 1 0 5.8"/><path d="M21 21v-2a4 4 0 0 0-3-3.85"/>',
@@ -10013,7 +10015,14 @@ function clmWorkCreatorName(item){const task=item?.raw||item;return clmTaskPerso
 function clmWorkOwnerName(item){const task=item?.raw||item;return clmTaskPersonName(item?.owner||task?.nguoi,task?.ownerName,'Chưa phân công');}
 function clmWorkCollaboratorNames(item){const task=item?.raw||item;return (task?.collaborators||item?.people||[]).map((id,index)=>clmTaskPersonName(id,task?.collaboratorNames?.[index]));}
 function clmWorkPeople(item){if(item.type==='meeting')return (item.raw?.attendees||[]).join(', ');return [clmWorkOwnerName(item),...clmWorkCollaboratorNames(item)].join(', ');}
-function clmTaskAssignmentMarkup(item){return `<span class="hub-task-person"><small>Người giao</small><b>${esc(clmWorkCreatorName(item))}</b></span><span class="hub-task-person"><small>Người nhận</small><b>${esc(clmWorkOwnerName(item))}</b>${(item.people||item.raw?.collaborators||[]).length?`<small>Phối hợp: ${esc(clmWorkCollaboratorNames(item).join(', '))}</small>`:''}</span>`;}
+function clmTaskAssignmentMarkup(item){const collaborators=clmWorkCollaboratorNames(item);return `<div class="task-card-person">${ic('user')}<div><span>Người giao</span><b>${esc(clmWorkCreatorName(item))}</b></div></div><div class="task-card-person">${ic('user')}<div><span>Người nhận</span><b>${esc(clmWorkOwnerName(item))}</b></div></div>${collaborators.length?`<div class="task-card-info">${ic('users')}<span>Phối hợp: ${esc(collaborators.join(', '))}</span></div>`:''}`;}
+
+function clmTaskCardShiftIcon(shift){
+  const path=shift==='morning'?'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>':shift==='afternoon'?'<path d="M20.9 13.1A9 9 0 0 1 10.9 3.1 9 9 0 1 0 20.9 13.1Z"/>':'';
+  return path?`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`:ic('clipboard');
+}
+function clmCloseTaskCardMenus(){document.querySelectorAll('.task-card-menu[open]').forEach(menu=>menu.open=false);}
+document.addEventListener('click',event=>{if(!event.target.closest('.task-card-menu'))clmCloseTaskCardMenus();});
 
 const clmBaseTaskHubState=taskHubState;
 taskHubState=function(){const state=clmBaseTaskHubState();if(!Object.prototype.hasOwnProperty.call(state,'shift'))state.shift='all';return state;};
@@ -10025,6 +10034,10 @@ filteredWorkItems=function(){const state=taskHubState();let rows=clmBaseFiltered
 workItemCard=function(item){
   const time=item.type==='meeting'&&workDateTime(item.start)?workDateTime(item.start).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}):'';
   const owner=item.type==='meeting'?(item.raw?.attendees||[])[0]:clmWorkOwnerName(item),extra=item.type==='meeting'?Math.max(0,(item.raw?.attendees||[]).length-1):Math.max(0,(item.people||[]).length),editable=item.kind==='task'&&workCanEdit(item);
+  if(item.kind==='task'){
+    const shift=clmNormalizeTaskShift(item.shift),openDetail=`openWorkDetail(${jsAttr(item.kind)},${jsAttr(item.id)})`;
+    return `<article class="hub-item hub-task-card shift-${shift||'unassigned'} ${item.type}" data-record-id="${esc(item.id)}" aria-label="${esc(item.title)}" tabindex="0" ${editable?`draggable="true" ondragstart="startTaskDrag(event,${jsAttr(item.id)})"`:''} onclick="${openDetail}" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();${openDetail}}"><div class="task-card-header"><span class="task-card-shift-icon">${clmTaskCardShiftIcon(shift)}</span><span class="hub-item-title">${esc(item.title)}</span><details class="task-card-menu" name="clm-task-actions" onclick="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()" onkeydown="if(event.key==='Escape'){event.stopPropagation();this.open=false;this.querySelector('summary').focus()}"><summary aria-label="Thao tác task: ${esc(item.title)}">${ic('more')}</summary><div class="task-card-actions"><button type="button" onclick="clmCloseTaskCardMenus();${openDetail}">${ic('eye')}Xem chi tiết</button>${editable?`<button type="button" onclick="clmCloseTaskCardMenus();openDuplicateTaskModal(${jsAttr(item.id)})">${ic('layers')}Nhân bản task</button><button type="button" onclick="clmCloseTaskCardMenus();openMoveTaskModal(${jsAttr(item.id)})">${ic('calendar')}Đổi ngày task</button>`:''}</div></details></div><div class="task-card-body">${clmTaskAssignmentMarkup(item)}<div class="task-card-info">${ic('file')}<span>${esc(workTypeLabel(item.type))} · ${esc(item.status)}</span></div></div><div class="task-card-footer">${clmTaskShiftBadge(shift)}</div></article>`;
+  }
   return `<article class="hub-item ${item.type}" data-record-id="${esc(item.id)}" ${editable?`draggable="true" ondragstart="startTaskDrag(event,${jsAttr(item.id)})"`:''} onclick="openWorkDetail(${jsAttr(item.kind)},${jsAttr(item.id)})" title="${esc(item.title)}"><span class="hub-item-title">${time?esc(time)+' · ':''}${esc(item.title)}</span>${item.kind==='task'?clmTaskAssignmentMarkup(item):`<span class="hub-item-assignee">${ic('users')}<b>${esc(owner||'Chưa phân công')}</b>${extra?`<em>+${extra}</em>`:''}</span>`}<span class="hub-item-meta">${esc(workTypeLabel(item.type))} · ${esc(item.status)}</span>${item.kind==='task'?clmTaskShiftBadge(item.shift):''}${editable?`<span class="hub-item-actions"><button class="hub-move-button" onclick="event.stopPropagation();openDuplicateTaskModal(${jsAttr(item.id)})" aria-label="Nhân bản task">${ic('layers')}Nhân bản</button><button class="hub-move-button" onclick="event.stopPropagation();openMoveTaskModal(${jsAttr(item.id)})" aria-label="Đổi ngày task">${ic('calendar')}Đổi ngày</button></span>`:''}</article>`;
 };
 
@@ -10094,6 +10107,51 @@ const clmTaskMentorStyle=document.createElement('style');clmTaskMentorStyle.text
 @media(max-width:1100px){.mentor-filters{grid-template-columns:repeat(3,minmax(140px,1fr))}.mentor-assignment-controls{grid-template-columns:1fr 1fr}.mentor-assignment-controls .btn{grid-column:1/-1}}
 @media(max-width:700px){.hub-toolbar{grid-template-columns:1fr 1fr}.hub-toolbar .search,.hub-view-switch{grid-column:1/-1}.hub-shift-filter{min-width:0;width:100%}.hub-item-actions{display:grid;grid-template-columns:1fr 1fr}.hub-item-actions .hub-move-button{justify-content:center}.mentor-panel{padding:14px;margin-inline:-2px}.mentor-panel-head,.mentor-assignment-head{align-items:flex-start}.mentor-filters,.mentor-assignment-controls{grid-template-columns:1fr}.mentor-assignment-controls .btn{grid-column:auto}.mentor-task-main{flex-direction:column}.mentor-task-tags{align-items:flex-start}.duplicate-summary{align-items:flex-start}.hub-detail-grid{grid-template-columns:1fr}.modal-f .duplicate-task-detail{order:-1}.uw-shift-field{width:100%}}
 `;document.head.appendChild(clmTaskMentorStyle);
+
+/* Task cards: shift colors, clear ownership and compact actions. */
+const clmTaskCardStyle=document.createElement('style');clmTaskCardStyle.textContent=`
+.hub-week{grid-template-columns:repeat(7,minmax(230px,1fr));overflow-x:auto}
+.hub-month{grid-template-columns:repeat(7,minmax(210px,1fr));overflow-x:auto}
+.hub-item.hub-task-card{--card-accent:#94a3b8;--card-tint:#f6f8fb;--card-icon-bg:#edf1f6;--card-icon:#64748b;position:relative;width:100%;margin:0 0 12px;padding:0;border:1px solid #e8edf4;border-radius:16px;background:#fff;color:#142647;box-shadow:0 5px 16px rgba(30,55,90,.045);overflow:visible;cursor:pointer;transition:box-shadow .18s,border-color .18s}
+.hub-item.hub-task-card.shift-morning{--card-accent:#ffbd52;--card-tint:#fffbf5;--card-icon-bg:#fff2d5;--card-icon:#e58a08}
+.hub-item.hub-task-card.shift-afternoon{--card-accent:#9985ff;--card-tint:#f8f6ff;--card-icon-bg:#eee9ff;--card-icon:#6143d3}
+.hub-item.hub-task-card:hover{border-color:#d5deeb;box-shadow:0 8px 22px rgba(30,55,90,.09)}
+.hub-task-card:focus-visible{outline:3px solid #c8d4ea;outline-offset:2px}
+.hub-task-card:has(.task-card-menu[open]){z-index:5}
+.task-card-header{display:flex;align-items:center;gap:9px;position:relative;padding:14px 10px 14px 12px;border-radius:15px 15px 0 0;background:var(--card-tint)}
+.task-card-header:before{content:'';position:absolute;left:-1px;top:12px;bottom:0;width:3px;background:var(--card-accent);border-radius:3px 0 0 0}
+.task-card-shift-icon{display:grid;place-items:center;width:32px;height:32px;flex:0 0 32px;border-radius:50%;color:var(--card-icon);background:var(--card-icon-bg)}
+.task-card-shift-icon svg{width:21px;height:21px}
+.hub-task-card .hub-item-title{flex:1;min-width:0;color:#101b30;font-size:13px;font-weight:750;line-height:1.5;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.task-card-body{display:grid;gap:13px;padding:15px 14px 13px}
+.task-card-person,.task-card-info{display:flex;align-items:flex-start;gap:10px;min-width:0;color:#53637f;font-size:12px;line-height:1.5}
+.task-card-person>svg,.task-card-info>svg{width:18px;height:18px;flex:0 0 18px;margin-top:2px;color:#71809b;stroke-width:1.8}
+.task-card-person>div{display:grid;gap:1px;min-width:0}
+.task-card-person b{color:#142647;font-size:12.5px;font-weight:750;overflow-wrap:anywhere}
+.task-card-info>span{min-width:0;overflow-wrap:anywhere}
+.task-card-footer{margin:0 14px;padding:11px 0 13px;border-top:1px solid #edf1f6}
+.task-card-footer .task-shift-badge{padding:8px 12px;gap:7px;border:0;font-size:12px;line-height:1.2}
+.task-card-footer .task-shift-badge svg{width:16px;height:16px}
+.task-card-footer .morning{background:#fff3d7;color:#9a5906}.task-card-footer .afternoon{background:#eee9ff;color:#5636c8}
+.task-card-menu{position:relative;flex:0 0 auto;align-self:flex-start;margin:-3px -3px 0 0}
+.task-card-menu summary{list-style:none;display:grid;place-items:center;width:28px;height:32px;padding:0;border:0;border-radius:8px;color:#9aa8bf;cursor:pointer}
+.task-card-menu summary::-webkit-details-marker{display:none}.task-card-menu summary:hover,.task-card-menu[open] summary{color:#53637f;background:#e9edf580}
+.task-card-menu summary svg{width:19px;height:19px;fill:currentColor;stroke-width:0}
+.task-card-actions{position:absolute;right:0;top:36px;z-index:6;display:grid;gap:3px;width:174px;padding:6px;background:#fff;border:1px solid #e3e8f0;border-radius:12px;box-shadow:0 8px 28px #172b4d24}
+.task-card-actions button{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:8px;border:0;border-radius:7px;background:#fff;text-align:left;font-size:12px;font-weight:600;color:#34435e;cursor:pointer}
+.task-card-actions button:hover{background:#f3f5f9}.task-card-actions svg{width:16px;height:16px;flex:0 0 16px}
+@media(max-width:760px){
+  .hub-item.hub-task-card{border-radius:17px;margin-bottom:14px}
+  .task-card-header{padding:16px 13px 16px 16px;gap:12px;border-radius:16px 16px 0 0}
+  .task-card-shift-icon{width:38px;height:38px;flex-basis:38px}.task-card-shift-icon svg{width:25px;height:25px}
+  .hub-task-card .hub-item-title{font-size:15px;line-height:1.45}
+  .task-card-body{gap:16px;padding:17px 18px 15px}
+  .task-card-person,.task-card-info{font-size:13px;gap:13px}.task-card-person b{font-size:14px}
+  .task-card-person>svg,.task-card-info>svg{width:21px;height:21px;flex-basis:21px}
+  .task-card-footer{margin:0 18px;padding:12px 0 16px}.task-card-footer .task-shift-badge{font-size:13px;padding:9px 14px}
+  .task-card-menu summary{width:34px;height:38px}.task-card-actions{top:42px;width:184px}.task-card-actions button{min-height:44px}
+}
+`;document.head.appendChild(clmTaskCardStyle);
 
 clmBoot();
 
