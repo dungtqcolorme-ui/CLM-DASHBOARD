@@ -2514,6 +2514,7 @@ html,body,button,input,select,textarea{font-family:Inter,"SF Pro Text","Segoe UI
 </style>
 <link rel="stylesheet" href="/creative-os/tokens.css">
 <link rel="stylesheet" href="/creative-os/creative-os.css">
+<link rel="stylesheet" href="/creative-os/workspaces.css">
 </head>
 <body>
 <div id="root"><div style="min-height:100vh;display:grid;place-items:center;font:14px Arial;color:#68707a"><div style="display:grid;justify-items:center;gap:14px"><span class="app-loading-spinner" style="margin:0"></span><span>Đang tải dữ liệu…</span></div></div></div>
@@ -2521,6 +2522,7 @@ html,body,button,input,select,textarea{font-family:Inter,"SF Pro Text","Segoe UI
 <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="true"></div>
 <script src="/creative-os/mascot-controller.js"></script>
 <script src="/creative-os/creative-os.js"></script>
+<script src="/creative-os/workspaces.js"></script>
 <script>
 /* ============ ICONS ============ */
 const ICON={
@@ -4728,7 +4730,7 @@ function render(){
   _authMounted=false;
   root.innerHTML=renderShell();
   window.__clmPerf=window.__clmPerf||{};window.__clmPerf.lastFullRenderMs=Math.round((performance.now()-renderStarted)*10)/10;
-  requestAnimationFrame(()=>{setupTips();enhanceA11y(root);window.CLMCreativeOS?.afterRender(route.page,{sourceState:syncState.badgeState});});
+  requestAnimationFrame(()=>{setupTips();enhanceA11y(root);window.CLMCreativeOS?.afterRender(route.page,{sourceState:syncState.badgeState});window.CLMWorkspaces?.afterRender(route.page);});
 }
 function renderPageInPlace(){
   const content=document.querySelector('#app .content');
@@ -4742,7 +4744,7 @@ function renderPageInPlace(){
   });
   document.querySelector('.sidebar')?.classList.toggle('mobile-open',Boolean(ui.mobileNav));
   document.querySelector('.sidebar-overlay')?.classList.toggle('show',Boolean(ui.mobileNav));
-  requestAnimationFrame(()=>{setupTips();enhanceA11y(content);window.CLMCreativeOS?.afterRender(route.page,{sourceState:syncState.badgeState});});
+  requestAnimationFrame(()=>{setupTips();enhanceA11y(content);window.CLMCreativeOS?.afterRender(route.page,{sourceState:syncState.badgeState});window.CLMWorkspaces?.afterRender(route.page);});
   window.__clmPerf=window.__clmPerf||{};window.__clmPerf.lastPageRenderMs=Math.round((performance.now()-started)*10)/10;
 }
 function go(page,params){
@@ -4876,7 +4878,7 @@ function renderPageContent(){
   const markup=fn();
   return route.page==='doingoai'&&window.CLMCreativeOS
     ?window.CLMCreativeOS.overview(markup,{canWork:session?.role!=='Viewer',empty:!myEvents().filter(e=>!ui.overviewCourse||eventHasCourse(e,ui.overviewCourse)).length})
-    :markup;
+    :(window.CLMWorkspaces?.present(route.page,markup)??markup);
 }
 function pageSkeleton(){
   return `<div class="page-head"><div><div class="sk sk-title"></div><div class="sk sk-sub"></div></div></div>
