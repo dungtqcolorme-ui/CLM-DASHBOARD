@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1870 325 1285 1190" fill="none">
+<!-- Exact front-view vector paths from official COLORO PDF; see docs/mascot-system.md. -->
+<g transform="translate(0 1828.57) scale(1 -1)">
+<g data-layer="BODY" transform="matrix(1 0 0 1 3138.46 1263.19)"><path d="M0 0 L-67.96 -790.64 L-204.62 -930.08 L-1049.11 -930.08 L-1185.78 -790.64 L-1253.74 0 L-1080.37 224.17 L-173.37 224.17 Z" fill="rgb(255,164,184)"/></g>
+<g data-layer="BODY_OUTLINE" transform="matrix(1 0 0 1 3138.46 1263.19)"><path d="M0 0 L-67.96 -790.64 L-204.62 -930.08 L-1049.11 -930.08 L-1185.78 -790.64 L-1253.74 0 L-1080.37 224.17 L-173.37 224.17 L0 0 Z" fill="none" stroke="rgb(0,0,0)" stroke-width="14" stroke-linecap="butt" stroke-linejoin="miter"/></g>
+<g data-layer="FACE" transform="matrix(1 0 0 1 3025.76 1199.74)"><path d="M0 0 L-55.742 -648.5 L-167.834 -762.872 L-860.502 -762.872 L-972.602 -648.5 L-1028.34 0 L-886.143 183.869 L-142.202 183.869 Z" fill="rgb(255,235,235)"/></g>
+<g data-layer="FACE_OUTLINE" transform="matrix(1 0 0 1 3025.76 1199.74)"><path d="M0 0 L-55.742 -648.5 L-167.834 -762.872 L-860.502 -762.872 L-972.602 -648.5 L-1028.34 0 L-886.143 183.869 L-142.202 183.869 L0 0 Z" fill="none" stroke="rgb(232,45,85)" stroke-width="14" stroke-linecap="butt" stroke-linejoin="miter"/></g>
+<g class="cos-eye">
+<g data-layer="LEFT_EYE" transform="matrix(1 0 0 1 2438.95 876.628)"><path d="M0 0 C0 -109.952 -57.635 -199.085 -128.732 -199.085 C-199.828 -199.085 -257.464 -109.952 -257.464 0 C-257.464 109.952 -199.828 199.085 -128.732 199.085 C-57.635 199.085 0 109.952 0 0" fill="rgb(253,253,253)"/></g>
+<g data-layer="LEFT_EYE_OUTLINE" transform="matrix(1 0 0 1 2438.95 876.628)"><path d="M0 0 C0 -109.952 -57.635 -199.085 -128.732 -199.085 C-199.828 -199.085 -257.464 -109.952 -257.464 0 C-257.464 109.952 -199.828 199.085 -128.732 199.085 C-57.635 199.085 0 109.952 0 0 Z" fill="none" stroke="rgb(2,2,2)" stroke-width="16.658" stroke-linecap="butt" stroke-linejoin="miter"/></g>
+<g data-layer="LEFT_PUPIL" transform="matrix(1 0 0 1 2408.96 901.316)"><path d="M0 0 C0 -71.784 -34.877 -129.976 -77.9 -129.976 C-120.922 -129.976 -155.799 -71.784 -155.799 0 C-155.799 71.784 -120.922 129.976 -77.9 129.976 C-34.877 129.976 0 71.784 0 0" fill="rgb(2,2,2)"/></g>
+<g data-layer="LEFT_HIGHLIGHT" transform="matrix(1 0 0 1 2351.92 901.316)"><path d="M0 0 C0 -19.214 -9.335 -34.79 -20.851 -34.79 C-32.367 -34.79 -41.702 -19.214 -41.702 0 C-41.702 19.214 -32.367 34.79 -20.851 34.79 C-9.335 34.79 0 19.214 0 0" fill="rgb(247,252,252)"/></g>
+</g>
+<g class="cos-eye">
+<g data-layer="RIGHT_EYE" transform="matrix(1 0 0 1 2845.48 876.628)"><path d="M0 0 C0 -109.952 -57.635 -199.085 -128.732 -199.085 C-199.828 -199.085 -257.464 -109.952 -257.464 0 C-257.464 109.952 -199.828 199.085 -128.732 199.085 C-57.635 199.085 0 109.952 0 0" fill="rgb(253,253,253)"/></g>
+<g data-layer="RIGHT_EYE_OUTLINE" transform="matrix(1 0 0 1 2845.48 876.628)"><path d="M0 0 C0 -109.952 -57.635 -199.085 -128.732 -199.085 C-199.828 -199.085 -257.464 -109.952 -257.464 0 C-257.464 109.952 -199.828 199.085 -128.732 199.085 C-57.635 199.085 0 109.952 0 0 Z" fill="none" stroke="rgb(2,2,2)" stroke-width="16.658" stroke-linecap="butt" stroke-linejoin="miter"/></g>
+<g data-layer="RIGHT_PUPIL" transform="matrix(1 0 0 1 2815.5 901.316)"><path d="M0 0 C0 -71.784 -34.877 -129.976 -77.9 -129.976 C-120.922 -129.976 -155.799 -71.784 -155.799 0 C-155.799 71.784 -120.922 129.976 -77.9 129.976 C-34.877 129.976 0 71.784 0 0" fill="rgb(2,2,2)"/></g>
+<g data-layer="RIGHT_HIGHLIGHT" transform="matrix(1 0 0 1 2758.45 901.316)"><path d="M0 0 C0 -19.214 -9.335 -34.79 -20.851 -34.79 C-32.367 -34.79 -41.702 -19.214 -41.702 0 C-41.702 19.214 -32.367 34.79 -20.851 34.79 C-9.335 34.79 0 19.214 0 0" fill="rgb(247,252,252)"/></g>
+</g>
+<g data-layer="LEFT_BROW" transform="matrix(1 0 0 1 2393.72 1157.7)"><path d="M0 0 C-18.194 -18.194 -42.308 -23.579 -53.86 -12.027 C-65.412 -0.475 -60.027 23.639 -41.833 41.833 C-23.639 60.027 0.475 65.412 12.027 53.86 C23.579 42.308 18.194 18.194 0 0" fill="rgb(255,164,184)"/></g>
+<g data-layer="LEFT_BROW_OUTLINE" transform="matrix(1 0 0 1 2393.72 1157.7)"><path d="M0 0 C-18.194 -18.194 -42.308 -23.579 -53.86 -12.027 C-65.412 -0.475 -60.027 23.639 -41.833 41.833 C-23.639 60.027 0.475 65.412 12.027 53.86 C23.579 42.308 18.194 18.194 0 0 Z" fill="none" stroke="rgb(232,45,85)" stroke-width="11.955" stroke-linecap="butt" stroke-linejoin="miter"/></g>
+<g data-layer="RIGHT_BROW" transform="matrix(1 0 0 1 2647.44 1157.7)"><path d="M0 0 C18.194 -18.194 42.308 -23.579 53.86 -12.027 C65.412 -0.475 60.027 23.639 41.833 41.833 C23.639 60.027 -0.475 65.412 -12.027 53.86 C-23.579 42.308 -18.194 18.194 0 0" fill="rgb(255,164,184)"/></g>
+<g data-layer="RIGHT_BROW_OUTLINE" transform="matrix(1 0 0 1 2647.44 1157.7)"><path d="M0 0 C18.194 -18.194 42.308 -23.579 53.86 -12.027 C65.412 -0.475 60.027 23.639 41.833 41.833 C23.639 60.027 -0.475 65.412 -12.027 53.86 C-23.579 42.308 -18.194 18.194 0 0 Z" fill="none" stroke="rgb(232,45,85)" stroke-width="11.955" stroke-linecap="butt" stroke-linejoin="miter"/></g>
+<g data-layer="MOUTH" transform="matrix(1 0 0 1 2465.18 677.543)"><path d="M0 0 C0 0 2.637 -59.33 90.313 -41.531" fill="none" stroke="rgb(232,45,85)" stroke-width="17.269" stroke-linecap="round" stroke-linejoin="round"/></g>
+</g>
+</svg>

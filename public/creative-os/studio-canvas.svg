@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" fill="none">
+  <title>ColorME — abstract studio composition</title>
+  <defs>
+    <linearGradient id="paper" x1="100" y1="0" x2="900" y2="1000" gradientUnits="userSpaceOnUse"><stop stop-color="#f7e8df"/><stop offset=".6" stop-color="#efb7a7"/><stop offset="1" stop-color="#c47f73"/></linearGradient>
+    <linearGradient id="ribbon" x1="150" y1="100" x2="800" y2="700" gradientUnits="userSpaceOnUse"><stop stop-color="#ff836d"/><stop offset=".55" stop-color="#e11b22"/><stop offset="1" stop-color="#8f1828"/></linearGradient>
+    <linearGradient id="edge" x1="200" y1="100" x2="700" y2="800" gradientUnits="userSpaceOnUse"><stop stop-color="#fff0dc"/><stop offset="1" stop-color="#d77f78"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="200%" height="200%"><feGaussianBlur stdDeviation="25"/></filter>
+    <pattern id="grain" width="8" height="8" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".65" fill="#502921" fill-opacity=".035"/></pattern>
+  </defs>
+  <path fill="url(#paper)" d="M0 0h1000v1000H0z"/>
+  <path d="M-100 790 610 80h140L40 790Z" fill="#fff5e7" opacity=".35"/>
+  <path d="M100 985 915 170h85L185 985Z" fill="#fff5e7" opacity=".2"/>
+  <g transform="translate(110 30) rotate(-14 400 400)">
+    <path d="M250 160h350l90 90v100H365l-55 55v170l55 55h325v105l-90 90H250l-115-115V275Z" fill="#612b2c" opacity=".23" filter="url(#shadow)" transform="translate(22 38)"/>
+    <path d="M245 120h350l90 90v100H360l-55 55v170l55 55h325v105l-90 90H245L130 670V235Z" fill="url(#edge)"/>
+    <path d="M245 105h350l90 90v100H360l-55 55v170l55 55h325v105l-90 90H245L130 655V220Z" fill="url(#ribbon)"/>
+    <path d="m245 105 45 61h276l119 29-90-90Z" fill="#ffbaa0" opacity=".65"/>
+    <path d="M360 295h325l-33-36H340l-72 72v205l37-16V350Z" fill="#ffb49c" opacity=".35"/>
+    <path d="m360 575-55-55-37 16 72 79h312l33-40Z" fill="#781a28" opacity=".35"/>
+  </g>
+  <path fill="url(#grain)" d="M0 0h1000v1000H0z"/>
+</svg>
