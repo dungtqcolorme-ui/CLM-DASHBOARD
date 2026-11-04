@@ -1,5 +1,3 @@
 "use client";
-import Link from "next/link";
-import { Capability, PageHeader, Panel } from "../components";
-import { useMarketing } from "../workspace";
-export default function AgentPage() { const { data, selected, href } = useMarketing(); const campaign = data.campaigns.find((c) => c.id === selected); return <><PageHeader title="AI Agent & Ideas" description="Nghiên cứu có dẫn nguồn và ý tưởng theo Campaign. Tác vụ AI sẽ được mở khi có backend và nguồn dữ liệu được cấp quyền." /><div className="mk-columns"><Panel title="Research workspace"><Capability name="agent" /><dl className="mk-definition"><dt>Auto</dt><dd>Chưa cấu hình bộ chọn nguồn và quota.</dd><dt>Internal Only</dt><dd>Chưa có kho kiến thức được kiểm chứng.</dd><dt>Deep Research</dt><dd>Chưa có gateway nghiên cứu có kiểm soát.</dd></dl><p className="mk-muted">Phase 2 · Chưa nhận prompt hoặc tạo đề xuất để tránh ghi nhận tác vụ chưa chạy.</p></Panel><Panel title="Campaign context"><h3>{campaign?.name || "Chưa chọn Campaign"}</h3><p>{campaign?.objective || "Chọn Campaign ở đầu trang để giữ bối cảnh khi làm việc."}</p><p className="mk-muted">Chưa có ý tưởng hoặc dẫn chứng được tạo. Chỉ thao tác chọn triển khai của thành viên mới mở công việc sáng tạo ở phase sau.</p><Link className="mk-button" href={href("/marketing/studio")}>Viết bản nháp thủ công</Link></Panel></div></>; }
+import { AgentKnowledge } from "../knowledge/agent";
+export default function AgentPage() { return <AgentKnowledge />; }

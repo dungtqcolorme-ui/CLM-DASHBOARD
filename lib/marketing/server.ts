@@ -7,7 +7,7 @@ import { MarketingError } from "@/lib/marketing/domain";
 export const MARKETING_CAPABILITIES: MarketingWorkspace["capabilities"] = {
   meta: { status: "not_connected", label: "Chưa kết nối Meta", detail: "Chưa xác minh Page ColorME Partnership, OAuth và quyền xuất bản. Xuất bản trực tiếp đang tắt." },
   drive: { status: "not_connected", label: "Chưa kết nối Google Drive", detail: "Kết nối Calendar/Gmail hiện có không cấp quyền Drive. Cần cấu hình riêng và duyệt quyền sử dụng tài sản." },
-  agent: { status: "not_configured", label: "Agent chưa cấu hình", detail: "Nghiên cứu, gợi ý có dẫn nguồn và chọn triển khai sẽ được bổ sung ở Phase 2. Không có tác vụ AI chạy ngầm." },
+  agent: { status: "not_configured", label: "AI chưa cấu hình", detail: "Kho kiến thức, tìm kiếm nội bộ và đề xuất theo quy tắc đã có trong AI Agent & Ideas. Chưa kết nối provider AI/nghiên cứu Internet; không có tác vụ AI chạy ngầm." },
   render: { status: "not_configured", label: "Render chưa cấu hình", detail: "Chưa có worker render video. Không có ảnh, video hoặc giọng nói được sinh bằng AI." },
 };
 

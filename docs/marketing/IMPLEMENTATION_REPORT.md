@@ -1,5 +1,7 @@
 # Báo cáo triển khai ColorME Partnership Marketing — 04/11/2026
 
+> Đây là snapshot Phase 1 tại `ca58b3d`. Đã triển khai tiếp Phase 2 core; xem `PHASE2_REPORT.md` và `VERIFICATION_PHASE2.json` để biết trạng thái mới nhất.
+
 Nhánh: `codex/partnership-marketing-foundation`. Base: `0515fc1bb52ce83f0d07411d555d4421285cbdf0` (`codex/loading-performance-chart-hotfix`). Phạm vi bàn giao là audit Phase 0 và nền tảng Phase 1 chạy qua API/PostgreSQL; chưa phải toàn bộ sản phẩm Phase 0–6, chưa triển khai production.
 
 ## Đã hoạt động

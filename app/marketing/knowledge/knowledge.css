@@ -1,0 +1,25 @@
+.mk-knowledge { font-size:14px; min-width:0; }
+.mk-knowledge .mk-tabs { flex-wrap:wrap; }
+.mk-knowledge button,.mk-knowledge select,.mk-knowledge input:not([type=checkbox]),.mk-knowledge summary { min-height:44px; }
+.mk-knowledge button,.mk-knowledge input,.mk-knowledge select,.mk-knowledge textarea { font-size:inherit; }
+.mk-knowledge :is(button,a,input,select,textarea,summary):focus-visible { outline:3px solid var(--mk-accent,#295aab); outline-offset:3px; }
+.mk-knowledge fieldset { border:0; padding:0; margin:0; min-width:0; display:grid; gap:14px; }
+.mk-knowledge .mk-field { min-width:0; }
+.mk-knowledge input,.mk-knowledge textarea,.mk-knowledge select { max-width:100%; width:100%; box-sizing:border-box; }
+.mk-knowledge textarea { resize:vertical; }
+.mk-k-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; align-items:start; }
+.mk-k-stack { display:grid; gap:16px; min-width:0; }
+.mk-k-card { padding:18px; border:1px solid #dce2ea; border-radius:12px; background:#fff; overflow-wrap:anywhere; }
+.mk-k-card h3 { margin:0 0 8px; }
+.mk-k-card p { white-space:pre-wrap; }
+.mk-k-meta { display:flex; flex-wrap:wrap; gap:8px; color:#465568; font-size:12px; }
+.mk-k-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.mk-k-check { display:flex; align-items:center; gap:10px; min-height:44px; }
+.mk-k-check input { width:20px; height:20px; flex-shrink:0; }
+.mk-k-evidence { border-left:3px solid #bbcddd; padding-left:12px; margin:12px 0; }
+.mk-k-evidence p { margin:6px 0; }
+.mk-k-context { border:1px solid #dce2ea; background:#f5f7fa; border-radius:12px; padding:16px; margin:0 0 20px; }
+.mk-k-diff { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.mk-k-diff pre,.mk-knowledge pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; background:#f5f7fa; padding:12px; border-radius:8px; }
+.mk-k-status { min-height:24px; margin:8px 0; }
+@media(max-width:760px) { .mk-k-grid,.mk-k-diff { grid-template-columns:1fr; } .mk-knowledge { font-size:14px; } .mk-k-card { padding:14px; } .mk-knowledge .mk-tabs button { flex:1 0 42%; } }

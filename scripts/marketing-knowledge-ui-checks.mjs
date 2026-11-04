@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict';
+
+/** Runs only against the caller's intercepted browser/API and disposable DB. */
+export async function testKnowledgeWorkflow({page:p,db,base,actors,team,campaign,shot,command,report}) {
+  await p.goto(base+`/marketing/agent?campaign=${campaign.id}`);
+  await p.getByRole('heading',{name:'AI Agent & Ideas',exact:true}).waitFor();
+  await p.getByRole('button',{name:'Knowledge Review',exact:true}).click();
+  await p.getByLabel('Tiêu đề nguồn',{exact:true}).fill('Brief kỹ năng · dữ liệu minh họa');
+  await p.getByLabel('Trích nội dung nguồn',{exact:true}).fill('Sinh viên luyện kỹ năng thiết kế bằng bài tập bố cục. Nội dung kiểm thử do người dùng nhập, không tải từ Internet.');
+  await p.getByRole('button',{name:'Lưu nguồn chờ duyệt',exact:true}).click();
+  await p.getByText('Đã thêm nguồn chờ duyệt. Nội dung biểu mẫu được giữ để tham khảo.',{exact:true}).waitFor();
+  await p.getByLabel('Lý do · Duyệt nguồn',{exact:true}).fill('Người kiểm thử đã đối chiếu brief.');
+  await p.getByRole('button',{name:'Duyệt nguồn',exact:true}).click();
+  await p.getByRole('button',{name:'Thu hồi nguồn',exact:true}).waitFor();
+  const source=(await db.query('select * from marketing_sources')).rows[0];assert.equal(source.status,'approved');
+  await p.getByRole('combobox',{name:/^Nguồn của phát biểu/}).selectOption(source.id);
+  const claim='Sinh viên có thể luyện bố cục bằng cách sắp xếp các hình cơ bản.';
+  await p.getByLabel('Phát biểu',{exact:true}).fill(claim);
+  await p.getByRole('button',{name:'Lưu phát biểu chờ duyệt',exact:true}).click();
+  await p.getByText('Đã lưu phát biểu chờ duyệt.',{exact:true}).waitFor();
+  await p.getByLabel('Lý do · Xác minh phát biểu',{exact:true}).fill('Đã kiểm chứng dữ kiện của brief minh họa.');
+  await p.getByRole('button',{name:'Xác minh phát biểu',exact:true}).click();
+  await p.getByText(/^(?:verified|Đã xác minh) · v2$/).waitFor();
+  const fact=(await db.query('select * from marketing_facts')).rows[0];assert.equal(fact.status,'verified');
+  await shot(p,'phase2-knowledge-review');
+  report.checks.push('Phase2 source/fact human review persists actual statuses, versions and provenance');
+
+  await p.getByRole('button',{name:'Research',exact:true}).click();
+  await p.getByRole('combobox',{name:/^Chế độ nghiên cứu/}).selectOption('internal_only');
+  await p.getByRole('textbox',{name:/^Từ khóa \/ câu hỏi nghiên cứu/}).fill('sinh viên');
+  await p.getByRole('button',{name:'Chạy nghiên cứu',exact:true}).click();
+  await p.getByText('Hoàn tất tìm nội bộ',{exact:true}).waitFor();
+  assert.equal((await db.query('select * from marketing_research_runs')).rows[0].evidence.length,1);
+  const before=(await db.query('select count(*)::int n from marketing_content_items')).rows[0].n;
+  await p.getByRole('button',{name:'Đề xuất từ nguồn nội bộ',exact:true}).click();
+  await p.getByText('Đã lưu ý tưởng theo quy tắc vào Idea Radar. Chưa tạo nội dung.',{exact:true}).waitFor();
+  assert.equal((await db.query('select count(*)::int n from marketing_content_items')).rows[0].n,before);
+  const idea=(await db.query('select * from marketing_ideas')).rows[0];assert.equal(idea.origin,'rule_based');
+  await shot(p,'phase2-research');
+  await p.getByRole('button',{name:'Idea Radar',exact:true}).click();
+  await p.getByText('Quy tắc nội bộ · không phải AI',{exact:true}).waitFor();
+  await shot(p,'phase2-idea-radar');
+  await p.getByRole('button',{name:'Chọn triển khai',exact:true}).click();
+  await p.waitForURL(/\/marketing\/studio\?content=/);
+  await p.getByRole('heading',{name:'Creative Studio',exact:true}).waitFor();
+  await p.getByText('Brief kỹ năng · dữ liệu minh họa',{exact:false}).first().waitFor();
+  const selected=(await db.query('select * from marketing_ideas where id=$1',[idea.id])).rows[0];
+  const retry=await command(p,actors[0],{action:'select_idea',id:idea.id,expected_version:idea.version});
+  assert.equal(retry.content_id,selected.content_id);assert.equal((await db.query('select count(*)::int n from marketing_content_items')).rows[0].n,before+1);
+  await shot(p,'phase2-studio-provenance');
+  report.checks.push('Research/proposals create no content until explicit selection; retry creates exactly one draft with Studio provenance');
+
+  await p.goto(base+`/marketing/agent?campaign=${campaign.id}`);await p.getByRole('button',{name:'Research',exact:true}).waitFor();
+  await p.getByRole('combobox',{name:/^Chế độ nghiên cứu/}).selectOption('deep_research');
+  await p.getByRole('textbox',{name:/^Từ khóa \/ câu hỏi nghiên cứu/}).fill('Nguồn bên ngoài chưa cấu hình');
+  await p.getByRole('button',{name:'Chạy nghiên cứu',exact:true}).click();await p.getByText('Chưa cấu hình',{exact:true}).first().waitFor();
+  assert.equal((await db.query("select status from marketing_research_runs where mode='deep_research'")).rows[0].status,'not_configured');
+  await p.getByRole('button',{name:'Idea Radar',exact:true}).click();
+  const manual=p.locator('.mk-panel').filter({has:p.getByRole('heading',{name:'Ý tưởng thủ công',exact:true})});
+  await manual.getByLabel('Tên ý tưởng',{exact:true}).fill('Ý tưởng tuần · minh họa');
+  await manual.getByLabel('Caption ý tưởng',{exact:true}).fill('Bản nháp thủ công kiểm thử. Chưa xuất bản.');
+  await manual.getByRole('button',{name:'Lưu ý tưởng',exact:true}).click();await manual.getByText('Đã lưu đề xuất v1.',{exact:true}).waitFor();
+  await p.getByRole('button',{name:'Weekly Planner',exact:true}).click();
+  await p.getByRole('textbox',{name:/^Giờ đề xuất/}).count().then(async count=>{if(count)await p.getByRole('textbox',{name:/^Giờ đề xuất/}).fill('2026-11-05T09:15');else await p.getByLabel(/^Giờ đề xuất/).fill('2026-11-05T09:15');});
+  await p.getByRole('button',{name:'Lưu ngày đề xuất',exact:true}).click();await p.getByText('Đã lưu đề xuất v2.',{exact:true}).waitFor();
+  const planned=(await db.query("select planned_for from marketing_ideas where origin='manual'")).rows[0];assert.equal(new Date(planned.planned_for).toISOString(),'2026-11-05T02:15:00.000Z');
+  await shot(p,'phase2-weekly-planner');report.checks.push('DeepResearch is honestly unconfigured; weekly proposed dates persist in UTC without publishing or tasks');
+
+  await p.goto(base+`/marketing/assets?campaign=${campaign.id}`);await p.getByRole('button',{name:'Brand Kit',exact:true}).click();
+  await p.getByRole('textbox',{name:/^Giọng thương hiệu/}).fill('Rõ ràng và gần gũi với sinh viên.');
+  await p.getByRole('textbox',{name:/^Quy tắc bắt buộc/}).fill('Không làm méo logo.');
+  await p.getByLabel('Lý do thay đổi DNA',{exact:true}).fill('Thiết lập quy tắc từ kiểm thử minh họa, chưa phải Brand Kit production.');
+  await p.getByRole('button',{name:'Lưu đề xuất DNA',exact:true}).click();
+  const confirmed=()=>p.getByRole('checkbox',{name:'Tôi đã xem so sánh và xác nhận áp dụng đề xuất DNA này.',exact:true});
+  await confirmed().check();await p.getByRole('button',{name:'Áp dụng DNA đã xác nhận',exact:true}).click();
+  await p.getByText(/^Dựa trên phiên bản 1\./).waitFor();
+  await p.getByRole('textbox',{name:/^Giọng thương hiệu/}).fill('Rõ ràng, tôn trọng và gần gũi.');await p.getByLabel('Lý do thay đổi DNA',{exact:true}).fill('Điều chỉnh v2 sau khi áp dụng v1, kiểm thử base version.');await p.getByRole('button',{name:'Lưu đề xuất DNA',exact:true}).click();
+  await confirmed().check();await p.getByRole('button',{name:'Áp dụng DNA đã xác nhận',exact:true}).click();await p.getByText(/^Dựa trên phiên bản 2\./).waitFor();
+  assert.equal((await db.query("select version from marketing_dna_profiles where scope='master'")).rows[0].version,2);
+  await shot(p,'phase2-master-dna');
+  await p.getByRole('combobox',{name:/^Phạm vi Brand DNA/}).selectOption('team');
+  await p.getByRole('textbox',{name:/^Giọng thương hiệu/}).fill('Giọng Partnership của team.');await p.getByLabel('Lý do thay đổi DNA',{exact:true}).fill('Đề xuất team kế thừa hard rules Master.');await p.getByRole('button',{name:'Lưu đề xuất DNA',exact:true}).click();await confirmed().check();await p.getByRole('button',{name:'Áp dụng DNA đã xác nhận',exact:true}).click();await p.getByText(/^Dựa trên phiên bản 1\./).waitFor();
+  await p.getByText('Không làm méo logo.',{exact:true}).first().waitFor();assert.deepEqual((await db.query("select payload from marketing_dna_profiles where scope='team'")).rows[0].payload.hard_rules,[]);
+  const post=await command(p,actors[1],{action:'propose_dna',scope:'post',team_id:team.id,content_id:selected.content_id,base_version:0,proposed:{voice:'',hooks:'',cta:'Thử bài tập nhỏ.',visual_notes:'',hard_rules:[]},reason:'Member đề xuất phần sáng tạo của bài.'});await command(p,actors[1],{action:'apply_dna',id:post.id,expected_version:post.version,confirmed:true});
+  await shot(p,'phase2-team-dna');report.checks.push('DNA diff/confirmation, sequential v1→v2 clean-form refresh, Team and Member Post retain Master hard rules');
+
+  const run=(await db.query("select id from marketing_research_runs where mode='internal_only'")).rows[0];const generated=await command(p,actors[0],{action:'generate_internal_ideas',run_id:run.id,content_line:'Meme'});assert.equal(generated.length,1);
+  await command(p,actors[0],{action:'review_source',id:source.id,expected_version:source.version,decision:'revoke',reason:'Kiểm thử thu hồi nguồn sau nghiên cứu.'});
+  await p.goto(base+`/marketing/agent?campaign=${campaign.id}`);await p.getByRole('button',{name:'Idea Radar',exact:true}).click();await p.getByText('Ý tưởng có dẫn chứng không còn khả dụng',{exact:true}).first().waitFor();assert.equal(await p.getByRole('button',{name:'Chọn triển khai',exact:true}).count(),1); // Only the independent manual idea remains eligible.
+  await p.getByRole('button',{name:'Weekly Planner',exact:true}).click();await shot(p,'phase2-revoked-evidence');
+  report.checks.push('Revoked evidence disappears from generated text/actions; unrelated manual proposal survives');
+  await p.setViewportSize({width:390,height:844});await p.getByRole('button',{name:'Knowledge Review',exact:true}).click();assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await shot(p,'phase2-knowledge-mobile');await p.setViewportSize({width:1440,height:1000});
+}
