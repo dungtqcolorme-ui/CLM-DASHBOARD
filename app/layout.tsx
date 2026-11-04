@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import WorkspaceHost from "./WorkspaceHost";
 
 export const metadata: Metadata = {
   title: "CLM DASHBOARD",
@@ -13,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col"><WorkspaceHost>{children}</WorkspaceHost></body>
     </html>
   );
 }

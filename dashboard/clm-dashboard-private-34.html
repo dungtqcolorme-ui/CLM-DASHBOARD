@@ -3,6 +3,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ColorME PR Sponsorship</title>
+<link rel="stylesheet" href="/marketing/legacy-navigation.css">
+<script src="/marketing/legacy-navigation.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
@@ -4494,6 +4496,7 @@ const NAV=[
  {sec:'Quản lý công việc'},
  {id:'phoihop',ten:'Task hàng ngày',icon:'users',roles:['Leader','Admin','Staff']},
  {id:'tailieu',ten:'Tài liệu',icon:'files',roles:['Leader','Admin','Staff','Viewer']},
+ {marketing:true},
  {sec:'Hệ thống'},
  {id:'taikhoan',ten:'Quản lý tài khoản',icon:'shield',roles:['Leader','Admin']},
 ];
@@ -4820,6 +4823,7 @@ function sessionAvatarMarkup(extra=''){return session?.avatarUrl?`<span class="a
 
 function renderShell(){
   const navHtml=NAV.map(n=>{
+    if(n.marketing)return window.clmMarketingNavigation?.render()||'';
     if(n.sec)return `<div class="nav-sec">${esc(n.sec)}</div>`;
     if(!n.roles.includes(session.role))return '';
     const active=route.page===n.id||(n.id==='hoso'&&route.page==='chitiet');

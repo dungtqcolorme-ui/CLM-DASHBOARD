@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { isMarketingPath } from "@/lib/marketing/navigation";
 import { ColoroLoading } from "./ColoroLoading";
 import { createDashboardBootstrap, loadBootstrapState } from "@/lib/dashboardBootstrap.mjs";
 import { FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +19,7 @@ const CACHE_TIMEOUT_MS = 3_000;
 const DASHBOARD_BOOT_TIMEOUT_MS = 40_000;
 const STATE_DOWNLOAD_TIMEOUT_MS = 30_000;
 const PROFILE_CACHE_TTL_MS = 5 * 60_000;
+const LEGACY_PAGES = ["doingoai", "truyenthong", "anpham", "hocbong", "baocao", "phoihop", "tailieu", "taikhoan"];
 
 type DashboardRpcMessage = {
   type: "clm-dashboard-rpc";
@@ -73,6 +76,7 @@ type DashboardRpcMessage = {
 };
 
 type DashboardBridgeWindow = Window & {
+  go?: (page: string) => void;
   __clmDashboardMessage?: (message: unknown) => void;
   __clmDashboardRpcResult?: (message: unknown) => void;
   __CLM_BOOTSTRAP_PROFILE__?: Partial<AuthProfile>;
@@ -246,6 +250,7 @@ function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" 
 }
 
 export default function Home() {
+  const router = useRouter();
   const [dashboardUrl, setDashboardUrl] = useState("");
   const [dashboardFrameKey, setDashboardFrameKey] = useState(0);
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -352,6 +357,11 @@ export default function Home() {
     bootstrapStateRef.current?.clear();
     setDashboardReady(true); setDashboardLoading(false); setDashboardBootError("");
     setLoadingSuccess(true);
+    const legacyPage = new URLSearchParams(window.location.search).get("legacy");
+    if (legacyPage && LEGACY_PAGES.includes(legacyPage)) {
+      const frameWindow = frame.contentWindow as DashboardBridgeWindow | null;
+      frameWindow?.go?.(legacyPage);
+    }
   }, [seedProfileFromDashboardBootstrap]);
 
   const openPrivateDashboard = useCallback(async (role: AppRole) => {
@@ -857,6 +867,8 @@ export default function Home() {
           try {
             const currentProfile = await loadCurrentProfile();
             if (!active) return;
+            const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+            if (isMarketingPath(returnTo)) { router.replace(returnTo); return; }
             if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
           } catch (sessionError) {
             if (!active || isAbortError(sessionError)) return;
@@ -900,6 +912,10 @@ export default function Home() {
     const handleDashboardPayload = (payload: unknown) => {
       if (!payload || typeof payload !== "object") return;
       const data = payload as Record<string, unknown>;
+      if (data.type === "clm-marketing-open") {
+        if (isMarketingPath(data.path)) router.push(data.path);
+        return;
+      }
       if (data.type === "clm-dashboard-logout") {
         void logout();
         return;
@@ -939,9 +955,17 @@ export default function Home() {
 
     const handleDashboardMessage = (event: MessageEvent) => {
       if (event.source !== dashboardFrameRef.current?.contentWindow) return;
+      if (event.data?.type === "clm-marketing-open" && event.origin !== window.location.origin) return;
       handleDashboardPayload(event.data);
     };
     window.addEventListener("message", handleDashboardMessage);
+    const resumeLegacy = () => {
+      const legacyPage = new URLSearchParams(window.location.search).get("legacy");
+      if (legacyPage && LEGACY_PAGES.includes(legacyPage)) {
+        (dashboardFrameRef.current?.contentWindow as DashboardBridgeWindow | null)?.go?.(legacyPage);
+      }
+    };
+    window.addEventListener("clm-legacy-resume", resumeLegacy);
 
     return () => {
       active = false; mountedRef.current = false;
@@ -949,11 +973,12 @@ export default function Home() {
       if (hostWindow.__clmReadDashboardState__ === readBootstrapState) delete hostWindow.__clmReadDashboardState__;
       authListener.subscription.unsubscribe();
       window.removeEventListener("message", handleDashboardMessage);
+      window.removeEventListener("clm-legacy-resume", resumeLegacy);
       if (hostWindow.__clmDashboardMessage === directBridge) {
         delete hostWindow.__clmDashboardMessage;
       }
     };
-  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, markDashboardReady, cancelDashboardBootstrap]);
+  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, markDashboardReady, cancelDashboardBootstrap, router]);
 
   useEffect(() => {
     if (!loadingSuccess) return;
@@ -971,6 +996,8 @@ export default function Home() {
       const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (loginError || !loginData.user) throw new Error("Email hoặc mật khẩu không đúng.");
       const currentProfile = await loadCurrentProfile();
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      if (isMarketingPath(returnTo)) { router.replace(returnTo); return; }
       if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
     } catch (loginError) {
       await getSupabaseClient().auth.signOut();

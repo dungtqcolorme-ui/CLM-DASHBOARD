@@ -1,0 +1,53 @@
+{
+  "checks": [
+    "Deep link requires existing ColorME sign-in",
+    "Admin creates real persisted team and memberships",
+    "Delayed autosave across remount cannot delete newer draft; conflict recovery explicit",
+    "Campaign draft → pending → active; shared plan autosaves and versions",
+    "Caption persisted; UTC conversion; separate production/review state; no schedule",
+    "Explicit Campaign switch survives refresh/create and clears incompatible open content",
+    "All eight real routes/deep links/empty states load without fake metrics",
+    "Browser back/forward restores child route and active navigation",
+    "Keyboard disclosure, reduced motion, mobile 390px without page overflow",
+    "Viewer write controls absent; Representative activation controls absent",
+    "Legacy iframe and unsaved input survive Marketing roundtrip, one shell load",
+    "Actual legacy sidebar has one Marketing parent and eight keyboard/collapse-safe links"
+  ],
+  "screenshots": [
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/plan-conflict.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/overview-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/campaigns-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/agent-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/studio-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/calendar-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/assets-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/intelligence-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/approvals-desktop.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/marketing-mobile.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/calendar-mobile.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/studio-mobile.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/approvals-mobile.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/legacy-sidebar-before.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/legacy-sidebar-after.png"
+  ],
+  "errors": [],
+  "externalBlocked": 0,
+  "commands": [
+    "create_team",
+    "set_member",
+    "set_member",
+    "set_member",
+    "create_campaign",
+    "update_plan",
+    "update_plan",
+    "update_plan",
+    "update_plan",
+    "submit_activation",
+    "activate_campaign",
+    "create_content",
+    "submit_review",
+    "create_campaign",
+    "create_content"
+  ],
+  "legacyShellLoads": 1
+}
