@@ -177,7 +177,7 @@ try{
   await now.page.waitForFunction(()=>document.body.dataset.cosWorkspace==='inventory');
   await now.page.getByLabel('Lọc tồn kho ấn phẩm theo khóa').selectOption('K143');await now.page.waitForTimeout(250);
   const motion=await now.page.evaluate(()=>({records:window.__qaAnimations.filter(r=>r.className.includes('cw-')||r.className.includes('cm-value')),transform:getComputedStyle(document.querySelector('.content')).transform,values:[...document.querySelectorAll('.cm-value')].map(e=>e.textContent)}));
-  assert.ok(motion.records.some(r=>r.className.includes('cw-inventory-analytics')),'Normal chart entry motion was not exercised');assert.equal(motion.transform,'none');stats.motion=motion;
+  assert.ok(motion.records.some(r=>r.className.includes('cw-chart-panel')),'Normal chart entry motion was not exercised');assert.equal(motion.transform,'none');stats.motion=motion;
   await now.page.emulateMedia({reducedMotion:'reduce'});assert.equal(await now.page.locator('.cw-primary-metric').evaluate(e=>getComputedStyle(e).animationName),'none');
   assert.deepEqual(stats.errors,[]);await writeFile(resolve(art,'qa-results.json'),JSON.stringify(stats,null,2));console.log(JSON.stringify({parity:stats.parity,interactions:stats.interactions,screenshots:stats.screenshots.length,errors:stats.errors,overview:stats.overview,normalMotion:true}));
  }

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "dist/**",
     ".wrangler/**",
     "next-env.d.ts",
+    // Pinned, unmodified third-party Motion runtime; provenance and MIT license beside it.
+    "public/creative-os/vendor/**",
   ]),
 ]);
 

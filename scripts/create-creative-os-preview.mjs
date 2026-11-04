@@ -8,12 +8,12 @@ const focused=process.argv.includes('--workspaces');
 
 const read=path=>readFile(new URL('../'+path,import.meta.url),'utf8');
 const inline=source=>source.replace(/<\/script/gi,'<\\/script');
-const [source,tokens,css,controller,adapter,svg,art,logo,workspaceCss,workspaceJs]=await Promise.all([
+const [source,tokens,css,controller,adapter,svg,art,logo,workspaceCss,workspaceJs,motion]=await Promise.all([
   read('dashboard/clm-dashboard-private-34.html'),read('public/creative-os/tokens.css'),
   read('public/creative-os/creative-os.css'),read('public/creative-os/mascot-controller.js'),
   read('public/creative-os/creative-os.js'),read('public/creative-os/coloro.svg'),read('public/creative-os/studio-canvas.svg'),
   readFile(new URL('../public/colorme-logo.png',import.meta.url)),
-  read('public/creative-os/workspaces.css'),read('public/creative-os/workspaces.js'),
+  read('public/creative-os/workspaces.css'),read('public/creative-os/workspaces.js'),read('public/creative-os/vendor/motion-14.9.0.js'),
 ]);
 const mascot='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg).replace(/'/g,'%27');
 const studio='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(art).replace(/'/g,'%27');
@@ -52,6 +52,7 @@ let html=source
   .replace('<link rel="stylesheet" href="/creative-os/workspaces.css">',()=>`<style>${workspaceCss.replaceAll('/creative-os/coloro.svg',mascot)}</style>`)
   .replace('<script src="/creative-os/mascot-controller.js"></script>',()=>`<script>${inline(controller)}</script>`)
   .replace('<script src="/creative-os/creative-os.js"></script>',()=>`<script>${inline(adapter.replaceAll('/creative-os/coloro.svg',mascot))}</script>`)
+  .replace('<script src="/creative-os/vendor/motion-14.9.0.js"></script>',()=>`<script>${inline(motion)}</script>`)
   .replace('<script src="/creative-os/workspaces.js"></script>',()=>`<script>${inline(workspaceJs)}</script>`)
   .replace(/\nclmBoot\(\);\s*\n/,()=>`\n${inline(boot)}\n`)
   .replace('<body>','<body><div class="cos-preview-banner" role="note"><strong>BẢN XEM TRƯỚC</strong><span>Dữ liệu minh họa · Không kết nối hệ thống thật</span></div>');
