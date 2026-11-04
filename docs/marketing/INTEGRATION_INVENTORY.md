@@ -34,7 +34,7 @@ The following are references from the supplied specification, **not verified ins
 | oliverames/meta-mcp-server, mikusnuz/meta-mcp, thenavidm/facebook-mcp-cli, HasData/facebook-mcp, thenavidm/instagram-mcp, posteverywhere/mcp | Defer. No exposed Meta/social tool is available in this chat. No deployment dependency exists. The archive date/API version reported in the attachment has not been independently certified; do not adopt or pin Graph API from it. Audit current source/license/API before Phase 4. |
 | Seym0n/tiktok-mcp, Infatoshi/x-mcp | Skip V1; no continuous monitoring or additional publishing channels. |
 | Remotion, HyperFrames, browser-use/video-use, ellmos-ai/ai-media-editor | Defer Phase 5. Not installed in this application's package manifest. Remotion commercial terms, actual render cost, worker isolation and STT sources require separate verification; no ElevenLabs dependency added. |
-| suprisedr/poster-design-mcp, Fabric.js, Konva | Defer Phase 3; no canvas dependency installed. PNG-only rendering cannot satisfy editable scene source. |
+| suprisedr/poster-design-mcp, Fabric.js, Konva | Not adopted. Phase 3 core uses native browser Canvas with versioned editable scene JSON; PNG is an export, not the source of truth. No canvas application dependency added. |
 | coreyhaines31/marketingskills, OpenClaudia/openclaudia-skills, cgallic/kai-cmo-harness, zubair-trabzada/ai-marketing-claude, linearclock/marketing-skills, nowork-studio/notfair-plugin | No blind installation. Existing host marketing skills are sufficient for later evaluation, but no application agent or external provider is configured in Phase 1. |
 | amekala/ads-mcp, googleads/google-ads-mcp, mikusnuz/meta-ads-mcp | Excluded; no advertising mutation or paid/organic mixing. |
 | InvokeAI, Qwen-Image, ComfyUI, comfyui-ipadapter, other image/video/voice generation | Excluded from app architecture and command allowlist. A developer image-generation tool being present does not make it reachable by the app. No generated media call was made. |
@@ -45,6 +45,10 @@ Meta remains **Not Connected**. `103245086061688` is only the user-provided Busi
 
 Google Calendar/Gmail OAuth does not authorize Drive. Drive, agent execution and video rendering remain unconfigured. Phase 1 stores no OAuth credentials, media, private source documents or personal comments.
 
+Phase 3 adds user-JWT private Supabase Storage uploads and native browser raster rendering only. The private bucket/policies are defined in a local additive migration; no real bucket was created in this session. Storage HTTP is simulated in the browser fixture, with actual PostgreSQL metadata/RLS executed locally. No Codex Drive connector was repurposed as the deployed application's OAuth connection. System font choices are editor defaults, not a claim about official ColorME typography.
+
 ## Documentation checked
 
 Current [Supabase RLS documentation](https://supabase.com/docs/guides/database/postgres/row-level-security) and [database functions documentation](https://supabase.com/docs/guides/database/functions) were consulted for policies, privileges and function security. The markdown changelog fetch was unavailable in the browser tool/restricted network; no compatibility claim relies on it. All adopted calls use the existing installed SDK and were exercised by API/SQL tests.
+
+Phase 3 additionally consulted current [private bucket documentation](https://supabase.com/docs/guides/storage/buckets/fundamentals) and [Storage access control](https://supabase.com/docs/guides/storage/security/access-control) through Supabase documentation search. Storage operations use existing SDK methods; deployed HTTP/policy integration remains unverified until staging acceptance.

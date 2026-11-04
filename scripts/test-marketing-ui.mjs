@@ -12,6 +12,7 @@ import {pathToFileURL} from 'node:url';
 import {routeLoader} from '../tests/helpers/load-route.mjs';
 import {creativeOsFixture} from '../tests/fixtures/creative-os.mjs';
 import {testKnowledgeWorkflow} from './marketing-knowledge-ui-checks.mjs';
+import {testCreativeWorkflow} from './marketing-creative-ui-checks.mjs';
 
 const base=process.env.CLM_MARKETING_QA_URL||'http://localhost:3104';
 assert.match(base,/^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
@@ -24,25 +25,32 @@ create function auth.uid() returns uuid language sql stable as $$select nullif(c
 grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;
 create table public.profiles(id uuid primary key,email text,status text,full_name text);
 create table public.user_roles(user_id uuid references public.profiles(id),role text,primary key(user_id,role));`);
+// Storage HTTP is simulated; SQL metadata and policies execute in PostgreSQL.
+// This never connects to Supabase Storage and is not a staging acceptance test.
+await db.exec(`create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,metadata jsonb,unique(bucket_id,name));alter table storage.objects enable row level security;grant usage on schema storage to authenticated;grant select,insert on storage.objects to authenticated;`);
 await db.exec(await readFile('supabase/migrations/20261104000100_marketing_foundation.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261104000200_marketing_knowledge.sql','utf8'));
+await db.exec(await readFile('supabase/migrations/20261104000300_marketing_creative.sql','utf8'));
 const actors=['Admin','PR Representative','PR Leader','Viewer'].map((role,i)=>({id:`${i+1}1111111-1111-4111-8111-111111111111`,email:`qa-${i}@example.test`,fullName:`Kiểm thử ${role}`,status:'active',roles:[role],createdAt:'2026-11-04T00:00:00Z',updatedAt:'2026-11-04T00:00:00Z'}));
 for(const actor of actors){await db.query('insert into profiles values($1,$2,$3,$4)',[actor.id,actor.email,actor.status,actor.fullName]);await db.query('insert into user_roles values($1,$2)',[actor.id,actor.roles[0]]);}
 const expiresAt=Math.floor(Date.now()/1000)+86400;
 const tokenFor=actor=>Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:actor.id,role:'authenticated',aud:'authenticated',exp:expiresAt})).toString('base64url')+'.fixture';
 const tokens=new Map(actors.map(actor=>[tokenFor(actor),actor]));
+const storedBytes=new Map();
 async function asActor(actor,sql,args=[]){return db.transaction(async tx=>{await tx.exec('set local role authenticated');await tx.query("select set_config('request.jwt.claim.sub',$1,true)",[actor.id]);return tx.query(sql,args);});}
 function clientFor(actor){return {
- from(table){assert.match(table,/^marketing_[a-z_]+$/);let columns='*',order=[],start=0,end=499;const q={select(value){columns=value;return q;},order(key,options){assert.match(key,/^[a-z_]+$/);order.push('"'+key+'" '+(options?.ascending===false?'desc':'asc'));return q;},range(from,to){start=from;end=to;return q;},then(resolve,reject){return (async()=>{try{assert.match(columns,/^[a-z_,*]+$/);const result=await asActor(actor,`select ${columns} from public.${table} order by ${order.join(',')} limit $1 offset $2`,[end-start+1,start]);const count=await asActor(actor,`select count(*)::int as total from public.${table}`);return {data:result.rows,error:null,count:count.rows[0].total};}catch(error){return {data:null,error};}})().then(resolve,reject);}};return q;},
- async rpc(name,args){assert.ok(['marketing_command','marketing_knowledge_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
+ from(table){assert.match(table,/^marketing_[a-z_]+$/);let columns='*',order=[],filters=[],start=0,end=499,one=false;const q={select(value){columns=value;return q;},eq(key,value){assert.match(key,/^[a-z_]+$/);filters.push([key,value]);return q;},maybeSingle(){one=true;return q;},order(key,options){assert.match(key,/^[a-z_]+$/);order.push('"'+key+'" '+(options?.ascending===false?'desc':'asc'));return q;},range(from,to){start=from;end=to;return q;},then(resolve,reject){return (async()=>{try{assert.match(columns,/^[a-z_,*]+$/);const where=filters.length?' where '+filters.map(([key],i)=>`"${key}"=$${i+1}`).join(' and '):'',values=filters.map(([,v])=>v);const result=await asActor(actor,`select ${columns} from public.${table}${where}${order.length?' order by '+order.join(','):''} limit $${values.length+1} offset $${values.length+2}`,[...values,end-start+1,start]);const count=await asActor(actor,`select count(*)::int as total from public.${table}${where}`,values);return {data:one?(result.rows[0]??null):result.rows,error:null,count:count.rows[0].total};}catch(error){return {data:null,error};}})().then(resolve,reject);}};return q;},
+ storage:{from(bucket){assert.equal(bucket,'marketing-originals');return {async upload(path,bytes,options){assert.equal(options.upsert,false);try{await asActor(actor,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',[bucket,path,JSON.stringify({size:bytes.length,mimetype:options.contentType})]);storedBytes.set(path,Buffer.from(bytes));return {data:{path},error:null};}catch(error){return {data:null,error};}},async download(path){try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);const bytes=rows.rows.length?storedBytes.get(path):null;if(!bytes)throw new Error('Private object unavailable');return {data:new Blob([bytes]),error:null};}catch(error){return {data:null,error};}}};}},
+ async rpc(name,args){assert.ok(['marketing_command','marketing_knowledge_command','marketing_creative_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
 };}
 const load=routeLoader({'@/lib/dashboardSession':{getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
 const api=load('app/api/marketing/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
+const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
 const env=await readFile('.env.local','utf8');const supabaseUrl=env.match(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)?.[1];
 assert.ok(supabaseUrl,'Public Supabase URL is required for the client SDK storage key');const storageKey=`sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 const browser=await playwright.chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});
-const report={checks:[],screenshots:[],errors:[],externalBlocked:0,commands:[],legacyShellLoads:0};
+const report={checks:[],screenshots:[],errors:[],externalBlocked:0,commands:[],legacyShellLoads:0,storageFixture:'In-memory Storage HTTP simulation with real disposable PostgreSQL object metadata/RLS; no deployed Storage service tested'};
 let lastPage;let stage='initializing';
 let planGate=null;
 const checkpoint=value=>{stage=value;console.log('QA:',value);};
@@ -52,12 +60,12 @@ async function context(actor,viewport={width:1440,height:1000}){
  if(actor)await ctx.addInitScript(({key,token,actor})=>localStorage.setItem(key,JSON.stringify({access_token:token,refresh_token:'fixture-only',token_type:'bearer',expires_in:86400,expires_at:Math.floor(Date.now()/1000)+86400,user:{id:actor.id,email:actor.email,aud:'authenticated',role:'authenticated',app_metadata:{},user_metadata:{},created_at:actor.createdAt}})),{key:storageKey,token:tokenFor(actor),actor});
  await ctx.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url());if(url.origin!==base){report.externalBlocked++;return route.abort();}
-  if(url.pathname==='/api/marketing'||url.pathname==='/api/marketing/knowledge'){
-   if(req.method()==='POST')report.commands.push(JSON.parse(req.postData()||'{}').action);
+  if(url.pathname==='/api/marketing'||url.pathname==='/api/marketing/knowledge'||creativeApis[url.pathname]){
+   if(req.method()==='POST'&&!url.pathname.endsWith('/upload'))report.commands.push(JSON.parse(req.postData()||'{}').action);
    if(req.method()==='POST'&&planGate&&JSON.parse(req.postData()||'{}').action==='update_plan'){const gate=planGate;planGate=null;gate.started.resolve();await gate.release.promise;}
-   const handler=url.pathname==='/api/marketing'?api:knowledgeApi;
-   const response=await handler[req.method()](new Request(req.url(),{method:req.method(),headers:req.headers(),...(req.method()==='POST'?{body:req.postData()}: {})}));
-   return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});
+   const handler=creativeApis[url.pathname]||(url.pathname==='/api/marketing'?api:knowledgeApi);
+   const response=await handler[req.method()](new Request(req.url(),{method:req.method(),headers:req.headers(),...(req.method()==='POST'?{body:req.postDataBuffer()}: {})}));
+   return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
   }
   if(url.pathname==='/api/auth/profile')return route.fulfill({json:{profile:actor}});
   if(url.pathname==='/api/dashboard/session')return route.fulfill({json:{ok:true}});
@@ -111,6 +119,8 @@ try{
  report.checks.push('Explicit Campaign switch survives refresh/create and clears incompatible open content');
  checkpoint('Phase2 knowledge, research, ideas and DNA');
  await testKnowledgeWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/knowledge'),report});
+ checkpoint('Phase3 Creative workflow');
+ await testCreativeWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/creative'),mainCommand:(page,actor,command)=>cmd(page,actor,command),report});
  checkpoint('eight routes');
  const titles={overview:'Marketing Overview',campaigns:'Campaigns',agent:'AI Agent & Ideas',studio:'Creative Studio',calendar:'Content Calendar',assets:'Asset & Template Library',intelligence:'Intelligence & Reports',approvals:'Approval Inbox'};
  for(const [path,name] of [['','overview'],['/campaigns','campaigns'],['/agent','agent'],['/studio','studio'],['/calendar','calendar'],['/assets','assets'],['/intelligence','intelligence'],['/approvals','approvals']]){

@@ -7,6 +7,7 @@ import { getSupabaseClient } from "@/lib/supabaseClient";
 import type { MarketingCommand, MarketingWorkspace } from "@/lib/marketing/types";
 import { MARKETING_NAV, isMarketingActive } from "@/lib/marketing/navigation";
 import { reconcileCampaignNavigation } from "./campaign-context";
+import { clearSceneDrafts } from "./creative/draft-state";
 
 const legacy = [["doingoai", "Đối ngoại"], ["truyenthong", "Truyền thông"], ["anpham", "Ấn phẩm"], ["hocbong", "Học bổng"], ["baocao", "Hiệu suất"], ["phoihop", "Task hàng ngày"], ["tailieu", "Tài liệu"]];
 export class MarketingError extends Error {
@@ -29,7 +30,7 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true); const [embedded, setEmbedded] = useState(true);
   const [selected, setSelected] = useState(""); const [open, setOpen] = useState(true); const [mobile, setMobile] = useState(false);
   const authGeneration = useRef(0);
-  const invalidate = useCallback((message: string, status: number) => { authGeneration.current += 1; setData(null); setError(message); setUnauthorized(status === 401); setLoading(false); }, []);
+  const invalidate = useCallback((message: string, status: number) => { authGeneration.current += 1; clearSceneDrafts(); setData(null); setError(message); setUnauthorized(status === 401); setLoading(false); }, []);
   const refresh = useCallback(async () => {
     const generation = authGeneration.current;
     const { data: auth } = await getSupabaseClient().auth.getSession();

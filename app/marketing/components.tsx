@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import type { ContentInput, MarketingCampaign, MarketingContent, MarketingCommand, MarketingRevision } from "@/lib/marketing/types";
 import { Icon, MarketingError, useMarketing } from "./workspace";
+import { canAdoptServerDraft } from "./knowledge/draft-refresh";
 import { discardDraftIfUnchanged, readDraft, useMountedEditor } from "./draft-cache";
 import { utcToVietnamLocal, vietnamLocalToUtc } from "@/lib/marketing/domain";
 
@@ -38,6 +39,14 @@ export function ContentEditor({ item, campaignId, onSaved }: { item?: MarketingC
   const draftKey = `clm-marketing-content-${data.profile.id}-${item?.id || campaignId || selected || "new"}`;
   const initial: ContentInput = { campaign_id: item?.campaign_id || campaignId || selected || "", title: item?.title || "", caption: item?.caption || "", content_line: item?.content_line || "Sharing", assignee_id: item?.assignee_id || null, production_status: item?.production_status || "not_started", production_due_at: item?.production_due_at || null, review_due_at: item?.review_due_at || null, proposed_publish_at: item?.proposed_publish_at || null };
   const [form, setForm] = useState(initial); const [version, setVersion] = useState(item?.version || 0); const [dirty, setDirty] = useState(false); const [pending, setPending] = useState(false); const [message, setMessage] = useState(""); const [conflict, setConflict] = useState(false);
+  // Adopt server content changes only when no caption draft is being edited or saved.
+  useEffect(() => {
+    if (item && !pending && canAdoptServerDraft(item.version, version, dirty, readDraft(draftKey))) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setForm({ campaign_id: item.campaign_id, title: item.title, caption: item.caption, content_line: item.content_line, assignee_id: item.assignee_id, production_status: item.production_status, production_due_at: item.production_due_at, review_due_at: item.review_due_at, proposed_publish_at: item.proposed_publish_at });
+      setVersion(item.version);
+    }
+  }, [item, dirty, pending, draftKey, version]);
   const currentCampaign = data.campaigns.find((c) => c.id === (item?.campaign_id || form.campaign_id));
   const editable = canWrite && (!currentCampaign || ["draft", "active"].includes(currentCampaign.status)) && (!item || ["draft", "changes_requested"].includes(item.publishing_status));
   const update = <K extends keyof ContentInput>(key: K, value: ContentInput[K]) => { const next = { ...form, [key]: value }; setForm(next); setDirty(true); setMessage("Chưa lưu · bản nháp được giữ trong phiên này"); try { sessionStorage.setItem(draftKey, JSON.stringify({ form: next, version })); } catch { /* Editor remains usable without storage. */ } };
@@ -50,7 +59,7 @@ export function ContentEditor({ item, campaignId, onSaved }: { item?: MarketingC
     {!item && <Field label="Campaign"><select required value={form.campaign_id} onChange={(e) => update("campaign_id", e.target.value)}><option value="">Chọn Campaign</option>{data.campaigns.filter((c) => ["draft", "active"].includes(c.status)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>}
     <Field label="Tên nội dung"><input required maxLength={180} value={form.title} onChange={(e) => update("title", e.target.value)} /></Field>
     <div className="mk-form-grid"><Field label="Tuyến bài"><select value={form.content_line} onChange={(e) => update("content_line", e.target.value as ContentInput["content_line"])}>{lines.map((line) => <option key={line}>{line}</option>)}</select></Field><Field label="Tiến độ sản xuất"><select value={form.production_status} onChange={(e) => update("production_status", e.target.value as ContentInput["production_status"])}>{["not_started", "writing", "designing", "editing", "ready"].map((s) => <option key={s} value={s}>{labels[s]}</option>)}</select></Field></div>
-    <Field label="Caption" hint="Bản nháp văn bản. Chưa có công cụ dựng ảnh/video hoặc AI trong Phase 1."><textarea className="mk-caption" rows={10} maxLength={12000} value={form.caption} onChange={(e) => update("caption", e.target.value)} /></Field>
+    <Field label="Caption" hint="Bản nháp văn bản; thiết kế ảnh được lưu riêng trong Creative Workbench."><textarea className="mk-caption" rows={10} maxLength={12000} value={form.caption} onChange={(e) => update("caption", e.target.value)} /></Field>
     <Field label="Người phụ trách (UUID)" hint="Để trống nếu chưa phân công. Người phụ trách phải thuộc team của Campaign."><input value={form.assignee_id || ""} placeholder="UUID tài khoản trong team" pattern="[0-9a-fA-F-]{36}" onChange={(e) => update("assignee_id", e.target.value || null)} /></Field>
     <div className="mk-form-grid">{([["production_due_at", "Hạn sản xuất"], ["review_due_at", "Hạn gửi duyệt"], ["proposed_publish_at", "Giờ đăng đề xuất"]] as const).map(([key, label]) => <Field key={key} label={`${label} · giờ Việt Nam`}><input type="datetime-local" value={localDateTime(form[key])} onChange={(e) => update(key, utcDateTime(e.target.value))} /></Field>)}</div>
     {canWrite && <button type="submit" className="mk-primary" disabled={!editable || pending || (!!item && !dirty)}>{pending ? "Đang lưu…" : item ? "Lưu thay đổi" : "Tạo bản nháp"}</button>}
