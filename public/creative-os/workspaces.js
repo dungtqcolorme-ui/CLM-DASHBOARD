@@ -5,6 +5,16 @@
  const reduced=matchMedia('(prefers-reduced-motion: reduce)');
  let renderedRoot=null,lastRoute='',lastFilter='',values=new Map(),chartValues=new Map(),positions=new Map(),viewport=0;
  const active=new Set();
+ let motionRequest=null;
+ function ensureMotion(){
+  if(scope.Motion?.animate)return Promise.resolve(true);
+  if(motionRequest)return motionRequest;
+  motionRequest=new Promise(resolve=>{
+   const script=document.createElement('script');script.src='/creative-os/vendor/motion-14.9.0.js';script.async=true;
+   script.onload=()=>resolve(Boolean(scope.Motion?.animate));
+   script.onerror=()=>{motionRequest=null;resolve(false);};document.head.append(script);
+  });return motionRequest;
+ }
  let lastTaskView='',taskRecords=new Map();
  function box(className,children=[]){const node=document.createElement('div');node.className=className;node.append(...children.filter(Boolean));return node;}
  function metricLabel(node){return node.querySelector('.cm-label,.metric-label')?.textContent.trim()||'';}
@@ -124,6 +134,9 @@
   renderedRoot=root;finishAnimations();hideTooltip();
   if(!root||!key){delete document.body.dataset.cosWorkspace;lastRoute='';lastFilter='';chartValues.clear();positions.clear();lastTaskView='';taskRecords.clear();return;}
   document.body.dataset.cosWorkspace=key;
+  if(!reduced.matches&&!scope.Motion?.animate)ensureMotion().then(loaded=>{
+   if(loaded&&root.isConnected&&document.querySelector('.cos-workspace')===root&&!reduced.matches){renderedRoot=null;lastRoute='';afterRender(route);}
+  });
   const entered=lastRoute!==route,filter=[...root.querySelectorAll('select,input')].map(n=>n.value).join('\u0001');
   const next=new Map(),nextCharts=new Map(),nextPositions=new Map();
   root.querySelectorAll('.compact-metric,.metric-card').forEach((card,index)=>{

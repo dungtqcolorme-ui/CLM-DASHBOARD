@@ -64,7 +64,9 @@ try{
   assert.equal(await now.page.locator('.cos-workspace').evaluate(root=>root.getAnimations({subtree:true}).filter(a=>a.playState==='running').length),0,route+' reduced motion still running');results.push(route);
  }
  const animated=await open(false,'no-preference');
- assert.equal(await animated.page.evaluate(()=>typeof window.Motion?.animate),'function','Official Motion runtime unavailable');
+ assert.equal(await animated.page.evaluate(()=>typeof window.Motion),'undefined','Overview must not load Motion');
+ await go(animated.page,'anpham');await animated.page.waitForFunction(()=>typeof window.Motion?.animate==='function');await animated.page.waitForTimeout(400);
+ await animated.page.evaluate(()=>go('doingoai'));await animated.page.locator('.cos-overview').waitFor();
  await animated.page.evaluate(()=>{window.motionCalls=[];const run=Motion.animate;Motion.animate=(target,frames,options)=>{window.motionCalls.push({className:target.getAttribute('class')||String(target.className),frames,options});return run(target,frames,options);};});
  await go(animated.page,'anpham');await animated.page.waitForTimeout(650);
  assert.ok(await animated.page.evaluate(()=>motionCalls.some(c=>c.className.includes('cw-chart-svg')||c.className.includes('mini-bar'))),'Chart entrance does not use Motion');

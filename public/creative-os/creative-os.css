@@ -144,13 +144,13 @@
 .cos-status-chart{flex:0 0 125px;width:125px;height:125px;font-family:inherit}
 .cos-chart-value{font-size:30px;font-weight:500;letter-spacing:-1px;fill:var(--cos-ink)}
 .cos-chart-caption{font-size:10px;fill:var(--cos-muted)}
-.cos-status .status-legend{min-width:120px;flex:1}
-.cos-status .status-row{font-size:11px;display:grid;grid-template-columns:6px minmax(0,1fr) 24px 30px;gap:6px;padding:8px 0;border-bottom:1px solid var(--cos-border)}
+.cos-status .status-legend{min-width:min(100%,200px);flex:1}
+.cos-status .status-row{font-size:11px;display:grid;grid-template-columns:6px minmax(0,1fr) max-content max-content;column-gap:12px;padding:8px 0;border-bottom:1px solid var(--cos-border)}
 .cos-status .status-row:last-child{border-bottom:0}
 .cos-status .status-row>span{width:5px;height:5px;border-radius:50%}
-.cos-status .status-row b{font-weight:400;color:var(--cos-ink)}
-.cos-status .status-row strong{font-weight:500;color:var(--cos-ink);font-variant-numeric:tabular-nums}
-.cos-status .status-row em{font-size:10px;color:var(--cos-muted);font-style:normal}
+.cos-status .status-row b{min-width:0;overflow-wrap:anywhere;text-align:left;font-weight:400;color:var(--cos-ink)}
+.cos-status .status-row strong{min-width:6.5ch;white-space:nowrap;text-align:right;font-weight:500;color:var(--cos-ink);font-variant-numeric:tabular-nums}
+.cos-status .status-row em{min-width:4.5ch;white-space:nowrap;text-align:right;font-size:10px;color:var(--cos-muted);font-style:normal;font-variant-numeric:tabular-nums}
 .cos-source{grid-area:source;padding:18px 20px}
 .cos-source .cos-panel-label{font-size:11px;margin-bottom:12px}
 .cos-source .cos-health-slot>div{margin:0!important}

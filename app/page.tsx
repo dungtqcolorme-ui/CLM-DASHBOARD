@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import { ColoroLoading } from "./ColoroLoading";
+import { createDashboardBootstrap, loadBootstrapState } from "@/lib/dashboardBootstrap.mjs";
 import { FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
@@ -74,6 +76,7 @@ type DashboardBridgeWindow = Window & {
   __clmDashboardMessage?: (message: unknown) => void;
   __clmDashboardRpcResult?: (message: unknown) => void;
   __CLM_BOOTSTRAP_PROFILE__?: Partial<AuthProfile>;
+  __clmReadDashboardState__?: (key: string) => Promise<unknown>;
 };
 
 type ProfileCacheEntry = {
@@ -204,39 +207,24 @@ function BrandLogo({ compact = false }: { compact?: boolean }) {
 }
 
 function DashboardLoading({
-  checking = false,
-  error = "",
-  onRetry,
+  checking = false, success = false, error = "", onRetry,
 }: {
-  checking?: boolean;
-  error?: string;
-  onRetry?: () => void;
+  checking?: boolean; success?: boolean; error?: string; onRetry?: () => void;
 }) {
+  const state = error ? "error" : success ? "success" : checking ? "checking" : "loading";
   return (
-    <div className="dashboard-loading" role="status" aria-live="polite">
-      <div className="loading-corner loading-corner-top" aria-hidden="true" />
-      <div className="loading-corner loading-corner-bottom" aria-hidden="true" />
+    <div className="dashboard-loading" data-state={state} role="status" aria-live="polite" aria-busy={!error && !success}>
       <div className="loading-content">
-        {error ? (
-          <>
-            <div className="loading-error-mark" aria-hidden="true">!</div>
-            <h1>Không thể tải dashboard</h1>
-            <p className="loading-error-copy">{error}</p>
-            {onRetry && <button className="loading-retry" type="button" onClick={onRetry}>Thử lại</button>}
-          </>
-        ) : (
-          <>
-            <div className="loading-orbit" aria-hidden="true">
-              <span className="loading-ring" />
-              <span className="loading-spinner" />
-            </div>
-            <h1>{checking ? "Đang kiểm tra phiên đăng nhập" : "Đang tải dữ liệu"}</h1>
-            <p>Vui lòng chờ trong giây lát…</p>
-            <div className="loading-dots" aria-hidden="true"><i /><i /><i /></div>
-          </>
-        )}
+        <ColoroLoading state={state} />
+        {error ? <>
+          <h1>Không thể tải dashboard</h1>
+          <p className="loading-error-copy">{error}</p>
+          {onRetry && <button className="loading-retry" type="button" onClick={onRetry}>Thử lại</button>}
+        </> : <>
+          <h1>{success ? "Không gian đã sẵn sàng" : checking ? "Đang kiểm tra phiên đăng nhập..." : "Đang chuẩn bị không gian làm việc..."}</h1>
+          {!success && <p>Coloro đang chuẩn bị mọi thứ cho bạn.</p>}
+        </>}
       </div>
-      <div className="loading-bars" aria-hidden="true"><i /><i /><i /><i /></div>
     </div>
   );
 }
@@ -264,6 +252,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardReady, setDashboardReady] = useState(false);
+  const [loadingSuccess, setLoadingSuccess] = useState(false);
   const [dashboardBootError, setDashboardBootError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -280,6 +269,15 @@ export default function Home() {
   const activeRoleRef = useRef<AppRole | "">("");
   const dashboardFrameRef = useRef<HTMLIFrameElement>(null);
   const appLoadIdRef = useRef("");
+  const bootstrapStateRef = useRef<ReturnType<typeof createDashboardBootstrap> | null>(null);
+  const activeBootKeyRef = useRef("");
+  const readyFrameRef = useRef<Document | null>(null);
+  const consumedBootKeyRef = useRef("");
+  const bootSequenceRef = useRef(0);
+  const bootGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
+  const sessionAbortRef = useRef<AbortController | null>(null);
+  if (bootstrapStateRef.current == null) bootstrapStateRef.current = createDashboardBootstrap(loadBootstrapState);
 
   const cacheProfile = useCallback((nextProfile: AuthProfile) => {
     profileRef.current = nextProfile;
@@ -338,20 +336,57 @@ export default function Home() {
     }
   }, [cacheProfile]);
 
+  const cancelDashboardBootstrap = useCallback(() => {
+    ++bootGenerationRef.current;
+    sessionAbortRef.current?.abort(); sessionAbortRef.current = null;
+    bootstrapStateRef.current?.clear(); activeBootKeyRef.current = ""; readyFrameRef.current = null; consumedBootKeyRef.current = "";
+  }, []);
+
+  const markDashboardReady = useCallback(() => {
+    const frame = dashboardFrameRef.current;
+    if (!frame?.contentDocument || readyFrameRef.current === frame.contentDocument || !activeBootKeyRef.current) return;
+    if (new URL(frame.src, window.location.href).searchParams.get("reload") !== activeBootKeyRef.current) return;
+    readyFrameRef.current = frame.contentDocument;
+    consumedBootKeyRef.current = activeBootKeyRef.current;
+    seedProfileFromDashboardBootstrap();
+    bootstrapStateRef.current?.clear();
+    setDashboardReady(true); setDashboardLoading(false); setDashboardBootError("");
+    setLoadingSuccess(true);
+  }, [seedProfileFromDashboardBootstrap]);
+
   const openPrivateDashboard = useCallback(async (role: AppRole) => {
+    if (!mountedRef.current) return;
+    cancelDashboardBootstrap();
+    const generation = bootGenerationRef.current;
+    const userId = profileRef.current?.id;
+    const controller = new AbortController();
+    sessionAbortRef.current = controller;
+    bootstrapStateRef.current?.clear(); activeBootKeyRef.current = ""; readyFrameRef.current = null; consumedBootKeyRef.current = "";
+    setLoadingSuccess(false);
     if (!appLoadIdRef.current) {
       appLoadIdRef.current = typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
-    await authorizedApi("/api/dashboard/session", {
+    try { await authorizedApi("/api/dashboard/session", {
       method: "POST",
       body: JSON.stringify({}),
       headers: { "X-CLM-App-Load": appLoadIdRef.current },
-    }, role);
-    setDashboardUrl(`/api/dashboard/shell?v=34&reload=${Date.now()}`);
+      signal: controller.signal,
+    }, role); } catch (sessionError) {
+      if (controller.signal.aborted || generation !== bootGenerationRef.current) return;
+      throw sessionError;
+    }
+    if (controller.signal.aborted || generation !== bootGenerationRef.current || profileRef.current?.id !== userId || activeRoleRef.current !== role) return;
+    sessionAbortRef.current = null;
+    const key = `${Date.now()}-${++bootSequenceRef.current}`;
+    activeBootKeyRef.current = key;
+    // Session cookies/role are established first. This is the same protected request
+    // the iframe needs, overlapped with shell parsing rather than cached across users.
+    void bootstrapStateRef.current?.begin(key);
+    setDashboardUrl(`/api/dashboard/shell?v=34&reload=${key}`);
     setDashboardFrameKey((currentKey) => currentKey + 1);
-  }, []);
+  }, [cancelDashboardBootstrap]);
 
   const enterDashboard = useCallback(async (role: AppRole) => {
     const currentProfile = profileRef.current;
@@ -365,6 +400,7 @@ export default function Home() {
     try {
       await openPrivateDashboard(role);
     } catch (dashboardError) {
+      if (isAbortError(dashboardError)) return;
       setDashboardLoading(false);
       setDashboardBootError(dashboardError instanceof Error ? dashboardError.message : "Không thể mở dashboard.");
     }
@@ -378,6 +414,7 @@ export default function Home() {
     try {
       await openPrivateDashboard(activeRoleRef.current);
     } catch (retryError) {
+      if (isAbortError(retryError)) return;
       setDashboardLoading(false);
       setDashboardBootError(retryError instanceof Error ? retryError.message : "Không thể mở dashboard.");
     }
@@ -758,6 +795,8 @@ export default function Home() {
     profileRequestRef.current = null;
     profileCacheRef.current = null;
     appLoadIdRef.current = "";
+    cancelDashboardBootstrap();
+    setLoadingSuccess(false);
     void fetch("/api/dashboard/session", { method: "DELETE" }).catch(() => undefined);
     await supabase.auth.signOut();
     setDashboardUrl("");
@@ -777,7 +816,7 @@ export default function Home() {
         "Không thể xóa bộ nhớ đệm.",
       ).catch(() => undefined);
     }
-  }, []);
+  }, [cancelDashboardBootstrap]);
 
   useEffect(() => {
     if (!dashboardLoading || dashboardReady || dashboardBootError) return;
@@ -794,10 +833,7 @@ export default function Home() {
       try {
         const dataset = dashboardFrameRef.current?.contentDocument?.documentElement.dataset;
         if (dataset?.clmReady === "1") {
-          seedProfileFromDashboardBootstrap();
-          setDashboardReady(true);
-          setDashboardLoading(false);
-          setDashboardBootError("");
+          markDashboardReady();
         } else if (dataset?.clmError) {
           setDashboardReady(false);
           setDashboardLoading(false);
@@ -808,11 +844,11 @@ export default function Home() {
       }
     }, 250);
     return () => window.clearInterval(timer);
-  }, [dashboardFrameKey, dashboardReady, dashboardUrl, seedProfileFromDashboardBootstrap]);
+  }, [dashboardFrameKey, dashboardReady, dashboardUrl, markDashboardReady]);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    let active = true;
+    let active = true; mountedRef.current = true;
 
     void supabase.auth.getSession()
       .then(async ({ data }) => {
@@ -820,6 +856,7 @@ export default function Home() {
         if (data.session) {
           try {
             const currentProfile = await loadCurrentProfile();
+            if (!active) return;
             if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
           } catch (sessionError) {
             if (!active || isAbortError(sessionError)) return;
@@ -837,6 +874,8 @@ export default function Home() {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT" && active) {
+        cancelDashboardBootstrap();
+        setLoadingSuccess(false);
         setDashboardUrl("");
         setDashboardLoading(false);
         setDashboardReady(false);
@@ -866,10 +905,7 @@ export default function Home() {
         return;
       }
       if (data.type === "clm-dashboard-ready") {
-        seedProfileFromDashboardBootstrap();
-        setDashboardReady(true);
-        setDashboardLoading(false);
-        setDashboardBootError("");
+        markDashboardReady();
         return;
       }
       if (data.type === "clm-dashboard-error") {
@@ -893,6 +929,13 @@ export default function Home() {
     const hostWindow = window as DashboardBridgeWindow;
     const directBridge = (message: unknown) => handleDashboardPayload(message);
     hostWindow.__clmDashboardMessage = directBridge;
+    const readBootstrapState = (key: string) => {
+      // A manually reloaded current frame must fetch fresh data, not reuse a
+      // consumed snapshot. Old/canceled frame keys still reject in the manager.
+      if (key === activeBootKeyRef.current && key === consumedBootKeyRef.current) return Promise.resolve(undefined);
+      return bootstrapStateRef.current!.read(key);
+    };
+    hostWindow.__clmReadDashboardState__ = readBootstrapState;
 
     const handleDashboardMessage = (event: MessageEvent) => {
       if (event.source !== dashboardFrameRef.current?.contentWindow) return;
@@ -901,14 +944,23 @@ export default function Home() {
     window.addEventListener("message", handleDashboardMessage);
 
     return () => {
-      active = false;
+      active = false; mountedRef.current = false;
+      cancelDashboardBootstrap();
+      if (hostWindow.__clmReadDashboardState__ === readBootstrapState) delete hostWindow.__clmReadDashboardState__;
       authListener.subscription.unsubscribe();
       window.removeEventListener("message", handleDashboardMessage);
       if (hostWindow.__clmDashboardMessage === directBridge) {
         delete hostWindow.__clmDashboardMessage;
       }
     };
-  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, seedProfileFromDashboardBootstrap]);
+  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, markDashboardReady, cancelDashboardBootstrap]);
+
+  useEffect(() => {
+    if (!loadingSuccess) return;
+    // Cosmetic exit only: dashboard is already visible and interactive.
+    const timer = window.setTimeout(() => setLoadingSuccess(false), 180);
+    return () => window.clearTimeout(timer);
+  }, [loadingSuccess]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -958,8 +1010,8 @@ export default function Home() {
             allow="clipboard-read; clipboard-write"
           />
         )}
-        {(!dashboardReady || dashboardLoading || dashboardBootError) && (
-          <DashboardLoading error={dashboardBootError} onRetry={() => void retryDashboard()} />
+        {(!dashboardReady || dashboardLoading || dashboardBootError || loadingSuccess) && (
+          <DashboardLoading success={loadingSuccess} error={dashboardBootError} onRetry={() => void retryDashboard()} />
         )}
       </main>
     );

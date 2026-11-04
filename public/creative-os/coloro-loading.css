@@ -1,0 +1,27 @@
+/* Lightweight motion for the exact official Coloro vector. No runtime/timer. */
+.coloro-loader{position:relative;display:grid;place-items:center;width:160px;height:180px;margin:0 auto 22px;isolation:isolate;pointer-events:none}
+.coloro-mark{display:block;width:132px;height:123px;transform-origin:50% 86%;animation:coloro-idle 2.8s ease-in-out infinite}
+.coloro-mark svg{display:block;width:100%;height:100%;overflow:visible}
+.coloro-shadow{position:absolute;left:40px;right:40px;bottom:35px;height:8px;border-radius:50%;background:#d8c7c4;opacity:.3;animation:coloro-shadow 2.8s ease-in-out infinite}
+.coloro-mark .cos-eye{transform-box:fill-box;transform-origin:center;animation:coloro-blink 4.8s ease-in-out infinite}
+.coloro-progress{position:absolute;bottom:0;width:64px;height:3px;overflow:hidden;background:#eadedb;border-radius:999px}
+.coloro-progress i{display:block;width:24px;height:100%;border-radius:inherit;background:#d85b70;animation:coloro-progress 1.4s ease-in-out infinite}
+.coloro-loader[data-state=checking] .cos-eye{animation:coloro-check 3.2s ease-in-out infinite}
+.coloro-loader[data-state=loading] .cos-eye{animation:coloro-look-down 4s ease-in-out infinite}
+.coloro-loader[data-state=error] .coloro-mark{animation:coloro-oops .3s ease-out both}
+.coloro-loader[data-state=error] .cos-eye{animation:none;transform:translateX(12px)}
+.coloro-loader[data-state=error] .coloro-shadow,.coloro-loader[data-state=error] .coloro-progress i{animation:none}
+.coloro-loader[data-state=error] .coloro-progress{visibility:hidden}
+.coloro-loader[data-state=success] .coloro-mark{animation:coloro-success .18s ease-out both}
+.coloro-loader[data-state=success] .cos-eye{animation:none;transform:scaleY(.85)}
+.coloro-loader[data-state=success] .coloro-shadow{animation:none}
+.coloro-loader[data-state=success] .coloro-progress{display:none}
+@keyframes coloro-idle{0%,100%{transform:translateY(0) rotate(-1.5deg) scale(1)}45%{transform:translateY(-6px) rotate(1.5deg) scale(1.015,.985)}65%{transform:translateY(-3px) rotate(.5deg) scale(.99,1.01)}}
+@keyframes coloro-shadow{0%,100%{transform:scaleX(1);opacity:.3}45%{transform:scaleX(.88);opacity:.2}}
+@keyframes coloro-blink{0%,43%,49%,100%{transform:scaleY(1)}46%{transform:scaleY(.08)}}
+@keyframes coloro-check{0%,100%{transform:translateX(-14px)}24%,42%{transform:translateX(14px)}55%,64%{transform:translateX(0) scaleY(1)}60%{transform:translateX(0) scaleY(.08)}}
+@keyframes coloro-look-down{0%,100%{transform:translateY(0)}20%,55%{transform:translateY(-13px)}68%,76%{transform:scaleY(1)}72%{transform:scaleY(.08)}}
+@keyframes coloro-progress{0%,100%{transform:translateX(-14px)}50%{transform:translateX(54px)}}
+@keyframes coloro-oops{from{transform:rotate(0)}to{transform:rotate(-6deg) translateY(2px)}}
+@keyframes coloro-success{0%{transform:translateY(0) scale(1)}45%{transform:translateY(-12px) scale(1.025,.98)}100%{transform:translateY(-4px) scale(1)}}
+@media(prefers-reduced-motion:reduce){.coloro-loader *{animation:none!important;transition:none!important}.coloro-mark,.coloro-shadow,.coloro-progress i,.coloro-mark .cos-eye{transform:none!important}.coloro-loader .coloro-progress i{width:100%;opacity:.55}}

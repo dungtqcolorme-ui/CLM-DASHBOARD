@@ -12,6 +12,7 @@ const {chromium}=runtime('playwright');
 const browser=await chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});
 const baseline=execFileSync('git',['show','38da3a834d6109d963dc466119abe9b3e8dcbf41:dashboard/clm-dashboard-private-34.html'],{encoding:'utf8',maxBuffer:16000000});
 const current=await readFile('dashboard/clm-dashboard-private-34.html','utf8');
+const allowStatusFix=process.argv.includes('--status-chart-hotfix');
 const stats={errors:[],screenshots:[],parity:[],geometry:[],interactions:[]};
 const routes=['truyenthong','anpham','hocbong','phoihop'];
 async function open(source){
@@ -23,7 +24,7 @@ async function open(source){
   if(u.origin!=='http://workspaces.test')return route.fulfill({body:''});
   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:source.replace(/\nclmBoot\(\);\s*\n/,'\n')});
   if(u.pathname.startsWith('/creative-os/')||u.pathname==='/colorme-logo.png'){
-   try{return route.fulfill({contentType:{'.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.png':'image/png'}[extname(u.pathname)],body:await readFile(resolve(root,'public','.'+u.pathname))});}catch{return route.fulfill({status:404,body:''});}
+   try{if(source===baseline&&u.pathname==='/creative-os/creative-os.css')return route.fulfill({contentType:'text/css',body:execFileSync('git',['show','38da3a8:public/creative-os/creative-os.css'])});return route.fulfill({contentType:{'.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.png':'image/png'}[extname(u.pathname)],body:await readFile(resolve(root,'public','.'+u.pathname))});}catch{return route.fulfill({status:404,body:''});}
   }
   return route.fulfill({contentType:'application/json',body:'{}'});
  });
@@ -136,24 +137,29 @@ try{
    overviewPaint.push(await p.evaluate(()=>{
     const properties=['display','position','width','height','overflow','visibility','opacity','transform','filter','clip-path','mask-image','font-family','font-size','font-weight','line-height','letter-spacing','color','background','border','border-radius','box-shadow','fill','stroke','stroke-width','content'];
     const style=(element,pseudo)=>{const s=getComputedStyle(element,pseudo);return Object.fromEntries(properties.map(name=>[name,s.getPropertyValue(name)]));};
-    return {bodyClass:document.body.className,bodyWorkspace:document.body.dataset.cosWorkspace,html:document.querySelector('#app').outerHTML,tree:[document.body,...document.querySelectorAll('#app,#app *')].map(element=>({tag:element.tagName,class:element.getAttribute('class'),rect:Object.fromEntries(Object.entries(element.getBoundingClientRect().toJSON()).map(([key,value])=>[key,Math.round(value*1000)/1000])),style:style(element),before:style(element,'::before'),after:style(element,'::after')}))};
+    return {bodyClass:document.body.className,bodyWorkspace:document.body.dataset.cosWorkspace,html:document.querySelector('#app').outerHTML,tree:[document.body,...document.querySelectorAll('#app,#app *')].map(element=>({statusLegend:Boolean(element.closest('.cos-status .status-legend')),tag:element.tagName,class:element.getAttribute('class'),rect:Object.fromEntries(Object.entries(element.getBoundingClientRect().toJSON()).map(([key,value])=>[key,Math.round(value*1000)/1000])),style:style(element),before:style(element,'::before'),after:style(element,'::after')}))};
    }));return stable;
   };
   const oldImage=await overviewImage(overviewOld.page),newImage=await overviewImage(overviewNow.page);
-  assert.deepEqual(overviewPaint[1],overviewPaint[0],'Approved overview/shell DOM, computed styles, pseudo-elements or geometry changed');
-  for(const asset of ['tokens.css','creative-os.css','creative-os.js','mascot-controller.js','coloro.svg','studio-canvas.svg'])assert.equal(await readFile('public/creative-os/'+asset,'utf8'),execFileSync('git',['show','38da3a8:public/creative-os/'+asset],{encoding:'utf8'}),'Approved overview asset changed: '+asset);
+  const protectedPaint=paint=>allowStatusFix?{...paint,tree:paint.tree.filter(node=>!node.statusLegend)}:paint;
+  assert.deepEqual(protectedPaint(overviewPaint[1]),protectedPaint(overviewPaint[0]),'Approved overview/shell DOM, computed styles, pseudo-elements or geometry changed outside allowed legend');
+  for(const asset of ['tokens.css','creative-os.css','creative-os.js','mascot-controller.js','coloro.svg','studio-canvas.svg']){
+   const normalize=text=>allowStatusFix&&asset==='creative-os.css'?text.replace(/^\.cos-status \.(?:status-legend|status-row(?: b| strong| em)?)\{[^\n]*\}$/gm,''):text;
+   assert.equal(normalize(await readFile('public/creative-os/'+asset,'utf8')),normalize(execFileSync('git',['show','38da3a8:public/creative-os/'+asset],{encoding:'utf8'})),'Approved overview asset changed outside status legend: '+asset);
+  }
   await writeFile(resolve(art,'overview-baseline.png'),oldImage);await writeFile(resolve(art,'overview-protected.png'),newImage);
   await writeFile(resolve(art,'overview-debug.json'),JSON.stringify(await Promise.all([old.page,now.page].map(p=>p.evaluate(()=>({scrollX,scrollY,focus:document.activeElement?.outerHTML.slice(0,180),workspace:document.body.dataset.cosWorkspace,overview:document.querySelector('.cos-overview').getBoundingClientRect().toJSON()})))),null,2));
   // Chrome's rasterizer can differ by one RGB level at a handful of SVG/text
   // edge pixels even with identical DOM, styles and geometry. Do not mask the
   // mascot or allow any meaningful visual/layout difference.
   const sharp=runtime('sharp'),a=await sharp(oldImage).raw().toBuffer({resolveWithObject:true}),b=await sharp(newImage).raw().toBuffer();
-  assert.equal(a.data.length,b.length);let differentPixels=0,maxDelta=0;
-  for(let index=0;index<a.data.length;index+=a.info.channels){let differs=false;for(let channel=0;channel<a.info.channels;channel++){const delta=Math.abs(a.data[index+channel]-b[index+channel]);if(delta)differs=true;maxDelta=Math.max(maxDelta,delta);}if(differs)differentPixels++;}
-  stats.overview={domIdentical:true,computedStylesAndGeometryIdentical:true,approvedAssetsIdentical:true,differentPixels,maxDelta,pixels:a.info.width*a.info.height};
+  assert.equal(a.data.length,b.length);let differentPixels=0,maxDelta=0,outsideLegendPixels=0;
+  const legendBounds=await overviewNow.page.locator('.cos-status .status-legend').boundingBox();
+  for(let index=0;index<a.data.length;index+=a.info.channels){let differs=false;for(let channel=0;channel<a.info.channels;channel++){const delta=Math.abs(a.data[index+channel]-b[index+channel]);if(delta)differs=true;maxDelta=Math.max(maxDelta,delta);}if(differs){differentPixels++;const pixel=index/a.info.channels,x=pixel%a.info.width,y=Math.floor(pixel/a.info.width);if(x<legendBounds.x-1||x>legendBounds.x+legendBounds.width+1||y<legendBounds.y-1||y>legendBounds.y+legendBounds.height+1)outsideLegendPixels++;}}
+  stats.overview={domIdentical:true,computedStylesAndGeometryIdentical:!allowStatusFix,protectedStylesAndGeometryIdentical:true,approvedAssetsIdentical:!allowStatusFix,protectedAssetsIdentical:true,outsideLegendPixels,differentPixels,maxDelta,pixels:a.info.width*a.info.height};
   await writeFile(resolve(art,'overview-paint.json'),JSON.stringify({overviewPaint,raster:stats.overview},null,2));
   // Evidence-sized bound: observed 103/1,296,000 one-level edge differences.
-  assert.ok(differentPixels<=128&&maxDelta<=1,`Approved overview screenshot changed: ${JSON.stringify(stats.overview)}`);
+  assert.ok(allowStatusFix?outsideLegendPixels===0:differentPixels<=128&&maxDelta<=1,`Approved overview screenshot changed outside allowed legend: ${JSON.stringify(stats.overview)}`);
   await overviewOld.context.close();await overviewNow.context.close();
   for(const route of routes){await now.page.evaluate(workspacesFixture);await go(now.page,route);for(const [width,height] of [[1920,1080],[1440,900],[1366,768],[1280,800],[1024,768],[768,1000],[390,844]]){
    await now.page.setViewportSize({width,height});

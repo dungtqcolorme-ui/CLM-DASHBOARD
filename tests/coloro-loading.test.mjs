@@ -1,0 +1,3 @@
+import assert from 'node:assert/strict';import test from 'node:test';import {readFile} from 'node:fs/promises';import {COLORO_SVG} from '../lib/coloroSvg.ts';
+test('loading uses the exact official Coloro vector rather than a recreated mascot',async()=>{assert.equal(COLORO_SVG,(await readFile('public/creative-os/coloro.svg','utf8')).trim());});
+test('private shell never claims ready before its authenticated bootstrap runs',async()=>{const html=await readFile('dashboard/clm-dashboard-private-34.html','utf8');assert.doesNotMatch(html.match(/<html[^>]*>/)?.[0]||'',/data-clm-ready/);assert.ok(html.indexOf("document.documentElement.dataset.clmReady='1'")>html.indexOf('remoteState=await clmFetchBootstrapState()'));});
