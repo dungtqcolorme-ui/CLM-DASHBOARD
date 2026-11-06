@@ -68,3 +68,19 @@ test('Marketing honors exact count when a database lowers its Data API row cap',
   const res=await f.route.GET(new Request('https://clm.example/api/marketing',{headers:{Authorization:'Bearer valid'}}));
   assert.equal(res.status,200);assert.equal((await res.json()).contentItems.length,401);
 });
+test('KPI revisions use a scoped RPC and require a real manager plus exact confirmation', async () => {
+  const proposal = { action:'propose_kpi_revision', id, expected_kpi_version:0, reason:'Điều chỉnh sản lượng', targets:[{name:'Bài đăng',target:12,unit:'bài'}] };
+  const confirmation = { action:'confirm_kpi_revision', id, expected_kpi_version:1, confirmed:true };
+  const rep = fixture();
+  assert.equal((await rep.route.POST(request(proposal))).status,200);
+  assert.deepEqual(rep.calls,[{name:'marketing_campaign_kpi_command',args:{p_command:proposal}}]);
+  assert.equal((await rep.route.POST(request(confirmation,{'X-CLM-Active-Role':'Admin'}))).status,403);
+  assert.equal(rep.calls.length,1);
+  const leader = fixture({roles:['PR Leader']});
+  for (const invalid of [{...confirmation,confirmed:false}, {...confirmation,targets:[]}, {...proposal,reason:' '}, {...proposal,expected_kpi_version:-1}]) {
+    assert.equal((await leader.route.POST(request(invalid))).status,400);
+  }
+  assert.equal(leader.calls.length,0);
+  assert.equal((await leader.route.POST(request(confirmation))).status,200);
+  assert.deepEqual(leader.calls,[{name:'marketing_campaign_kpi_command',args:{p_command:confirmation}}]);
+});

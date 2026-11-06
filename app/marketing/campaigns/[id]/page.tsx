@@ -3,10 +3,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { ContentMix, KpiDraft, MarketingCampaign } from "@/lib/marketing/types";
-import { Badge, Capability, CommandButton, ContentEditor, ContentRows, Empty, Field, PageHeader, Panel, RevisionHistory, dateTime, lines } from "../../components";
+import { Badge, Capability, CommandButton, ContentEditor, ContentRows, Empty, Field, PageHeader, Panel, RevisionHistory, lines } from "../../components";
 import { MarketingError, useMarketing } from "../../workspace";
 import { discardDraftIfUnchanged, readDraft, useMountedEditor } from "../../draft-cache";
 import { CampaignForm } from "../../campaign-form";
+import { OfficialKpis } from "../../campaign-kpis";
 
 const tabs = [["overview", "Overview"], ["strategy", "Strategy"], ["content-plan", "Content Plan"], ["calendar", "Calendar"], ["assets", "Assets"], ["insights", "Insights"]] as const;
 export default function CampaignDetail() {
@@ -25,11 +26,9 @@ export default function CampaignDetail() {
   {tab === "content-plan" && <SharedPlan key={campaign.id} campaign={campaign} editable={canWrite && ["draft", "active"].includes(campaign.status)} />}
   {tab === "calendar" && <Panel title="Kế hoạch nội dung"><p className="mk-muted">Asia/Ho_Chi_Minh · Giờ đề xuất trong ứng dụng, chưa phải lịch Meta.</p><ContentRows items={[...items].sort((a, b) => (a.proposed_publish_at || "z").localeCompare(b.proposed_publish_at || "z"))} /><Link className="mk-button" href={href(`/marketing/calendar?campaign=${id}`)}>Mở Calendar toàn cục</Link></Panel>}
   {tab === "assets" && <Panel title="Tài nguyên Campaign"><Capability name="drive" /><p className="mk-muted">Chỉ tài nguyên có nguồn và quyền sử dụng được xác minh mới đủ điều kiện xuất bản ở phase tiếp theo.</p></Panel>}
-  {tab === "insights" && <div className="mk-columns"><OfficialKpis campaign={campaign} /><Panel title="Kết quả Organic"><Capability name="meta" /><p className="mk-muted">Actual chưa khả dụng. KPI target không phải kết quả thực tế.</p></Panel></div>}
+  {tab === "insights" && <div className="mk-columns"><OfficialKpis key={campaign.id} campaign={campaign} showRevision /><Panel title="Kết quả Organic"><Capability name="meta" /><p className="mk-muted">Actual chưa khả dụng. KPI target không phải kết quả thực tế.</p></Panel></div>}
   </>;
 }
-
-function OfficialKpis({ campaign }: { campaign: MarketingCampaign }) { return <Panel title="KPI chính thức · snapshot kích hoạt">{campaign.official_kpis ? <><p className="mk-muted">Xác nhận {dateTime(campaign.activated_at)} · {campaign.activated_by}</p>{campaign.official_kpis.length ? <ul className="mk-kpi-list">{campaign.official_kpis.map((kpi, i) => <li key={i}><span>{kpi.name}</span><strong>{kpi.target ?? "Chưa đặt"} {kpi.unit}</strong></li>)}</ul> : <p>Snapshot này chưa đặt KPI.</p>}</> : <p className="mk-muted">Chưa kích hoạt. Leader/Admin xác nhận KPI nháp thành snapshot chính thức khi kích hoạt.</p>}<p className="mk-muted">Actual Organic: chưa có kết nối dữ liệu.</p></Panel>; }
 
 function SharedPlan({ campaign, editable }: { campaign: MarketingCampaign; editable: boolean }) {
   const { command, refresh, data } = useMarketing(); const mounted = useMountedEditor();

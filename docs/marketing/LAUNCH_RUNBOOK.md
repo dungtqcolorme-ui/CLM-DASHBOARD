@@ -10,6 +10,7 @@ Dùng một dự án Supabase staging riêng và một deployment preview giới
 4. `20261105000100_marketing_publishing.sql`
 5. `20261105000200_marketing_video_reports.sql`
 6. `20261106000100_marketing_hardening.sql`
+7. `20261106000200_marketing_kpi_revisions.sql`
 
 Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration đã áp dụng và cách truy cập bản sao lưu. Kiểm tra `marketing-originals` và `marketing-footage` là bucket riêng tư, quyền SELECT/INSERT khớp với chính sách Marketing và các chính sách Storage có sẵn. Dùng tài khoản thật của staging để thử upload, tải private và phát/seek media qua URL ký 60 giây. Kiểm tra quyền khi nguồn bị thu hồi, link đã phát hành hết hạn, file sai MIME và người ngoài team.
 
@@ -23,6 +24,7 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 | Đồng thời | Hai phiên PostgreSQL độc lập cùng duyệt, worker trùng claim, Hold khi bắt đầu dispatch, hết lease sau remote write, revoke quyền sau duyệt. Lưu trình tự giao dịch và job/incident cuối. |
 | Hiệu năng | Đo p50/p95 cho Overview, list theo team, mở Studio, tải preview và PDF/XLSX trên dữ liệu staging có kích thước dự kiến. Theo dõi 429/503, kích thước response, truy vấn chậm và bộ nhớ export. Kiểm tra truy vấn bằng EXPLAIN trên staging. |
 | Dashboard cũ | Login, Task, Email/Calendar, Báo cáo, catalog, điều hướng desktop/mobile và dữ liệu chưa lưu khi quay lại iframe. |
+| KPI Campaign | Representative lưu đề xuất có lý do, Leader cùng team hoặc Admin xác nhận đúng phiên bản. Kiểm tra KPI gốc và bản duyệt đăng vẫn sử dụng mốc phiên bản tương ứng. |
 | Báo cáo | Kỳ tuần/tháng theo giờ Việt Nam, trường thiếu hiển thị đúng, approval ràng buộc phiên bản và hai định dạng mở được bằng ứng dụng đích. |
 
 Ngân sách database tính theo phút và theo tài khoản. Mutation thông thường 240, tạo báo cáo 12, yêu cầu render 6, xuất báo cáo 10. Command bị rollback cũng rollback bộ đếm. Emergency Hold vẫn qua kiểm tra quyền và lý do khi chạm ngân sách. Các giới hạn này không bao phủ truy vấn đọc trực tiếp hoặc request vô danh. Chỉ mở rộng nhóm pilot sau khi theo dõi mức dùng và cấu hình giới hạn hạ tầng tương ứng. Giữ nguyên RLS và quyền riêng tư cho dữ liệu nguồn trong mọi phép đo.
@@ -39,5 +41,5 @@ Ngân sách database tính theo phút và theo tài khoản. Mutation thông th�
 
 1. Admin thêm một team pilot và phân vai theo tài khoản ColorME thực tế. Kiểm tra read-only và quy trình Campaign, nội dung, báo cáo trước khi mở tích hợp.
 2. Với rủi ro xuất bản, đặt Emergency Hold kèm lý do. Đọc job và incident theo từng snapshot. `Unknown` hoặc `Cancellation Pending` cần kiểm tra trên Meta và lưu receipt xác minh trước khi đóng incident. Acknowledge chỉ ghi nhận người đã xem cảnh báo.
-3. Nếu cần rollback ứng dụng, dùng bản deploy đã xác minh trước đó. Giữ bảng và revision Marketing để điều tra và khôi phục. Nếu cần khóa API, dùng migration thu hồi quyền execute của các RPC Marketing và chính sách Storage liên quan, đồng thời vô hiệu hóa worker/secret tương ứng. Kiểm tra RLS và chức năng legacy sau rollback.
+3. Nếu cần rollback ứng dụng, dùng bản deploy đã xác minh trước đó. Giữ bảng và revision Marketing để điều tra và khôi phục. Nếu rollback ứng dụng về trước migration KPI, giao diện cũ hiển thị KPI tại mốc kích hoạt. Lịch sử và KPI revision đã xác nhận vẫn lưu trong database. Nếu cần khóa API, dùng migration thu hồi quyền execute của các RPC Marketing và chính sách Storage liên quan, đồng thời vô hiệu hóa worker/secret tương ứng. Kiểm tra RLS và chức năng legacy sau rollback.
 4. Mỗi lần mở rộng rollout cần người vận hành xác nhận test staging, nguồn lưu bằng chứng và người chịu trách nhiệm xử lý incident. Trạng thái của từng tính năng được ghi trong `FEATURE_READINESS.md`.

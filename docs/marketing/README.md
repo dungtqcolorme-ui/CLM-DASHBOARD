@@ -14,7 +14,7 @@ Open `/marketing`. A missing login returns to the original dashboard with a vali
 
 ## Apply on staging before production
 
-1. Apply the six ordered migrations in `LAUNCH_RUNBOOK.md` to staging. Review the additive tables, RPCs and private `marketing-originals` and `marketing-footage` buckets. Review all active Storage policies before pilot access.
+1. Apply the seven ordered migrations in `LAUNCH_RUNBOOK.md` to staging. Review the additive tables, RPCs and private `marketing-originals` and `marketing-footage` buckets. Review all active Storage policies before pilot access.
 2. Deploy the application branch to staging. Production was not deployed by this implementation.
 3. Admin creates an explicit Marketing team in Overview and adds actual profile UUIDs. Do not import mentor assignments as team scope.
 4. Verify real active/locked/Viewer/Representative/Leader/Admin accounts, cross-team isolation, edit conflicts, deep links, refresh and legacy regression. Run multi-session PostgreSQL contention checks before rollout.
@@ -36,7 +36,7 @@ MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite
 MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite/dist/index.js node scripts/test-marketing-knowledge-db.mjs
 MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite/dist/index.js node scripts/test-marketing-creative-db.mjs
 MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite/dist/index.js node scripts/test-marketing-publishing-db.mjs
-MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite/dist/index.js node scripts/test-marketing-video-reports-db.mjs --hardening
+MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite/dist/index.js node scripts/test-marketing-video-reports-db.mjs --kpi-revisions
 ```
 
 Browser/API/SQL fixture tests require a local Next server, Chrome/Playwright and an FFmpeg CLI with libx264 for the synthetic fixture. They use synthetic identity and a disposable PostgreSQL engine, block external requests and never write live data:
@@ -48,6 +48,10 @@ MARKETING_PGLITE_MODULE=/absolute/test-runtime/node_modules/@electric-sql/pglite
 `CLM_QA_RUNTIME` selects an existing package.json beside Playwright and `CLM_QA_BROWSER` selects its Chromium channel. Screenshots and machine-readable results are written under ignored `tmp/marketing/`; all screenshot data are illustrative fixtures. Do not use fixture credentials/tokens against any real provider.
 
 Creative browser tests simulate Storage HTTP bytes in memory while executing real object metadata/RLS locally. They validate actual PNG output signatures/dimensions/pixels; they do not certify the Supabase Storage service or deployed policies. Test actual authenticated upload/download, quotas, MIME metadata, role changes and multi-session behavior on staging before release.
+
+## KPI revisions after activation
+
+Open an active Campaign and select **Insights**. An authorized member can save proposed targets and a reason. The team Leader or Admin reviews the current and proposed targets and confirms the saved proposal. The confirmed KPI appears alongside the activation baseline and confirmation history. The KPI sequence is independent of the Campaign version used by publishing approvals.
 
 ## Reports and rollback
 

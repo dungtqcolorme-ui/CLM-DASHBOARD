@@ -33,7 +33,7 @@ select pg_temp.expect(not has_function_privilege('authenticated',('marketing_pri
 from unnest(array['command','knowledge_command','creative_command','publishing_command','video_command','report_command']) fn;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','60000000-0000-4000-8000-000000000001',true);
-select pg_temp.expect(public.marketing_readiness_probe()='20261106000100','actual Admin schema marker');
+select pg_temp.expect(public.marketing_readiness_probe()=case when to_regprocedure('public.marketing_campaign_kpi_command(jsonb)') is null then '20261106000100' else '20261106000200' end,'actual Admin schema marker');
 select set_config('hardening.team',public.marketing_command('{"action":"create_team","name":"Hardening fixture"}')->>'id',true);
 select public.marketing_command(jsonb_build_object('action','set_member','team_id',current_setting('hardening.team'),'user_id','60000000-0000-4000-8000-000000000002','enabled',true));
 select set_config('hardening.campaign',public.marketing_command(jsonb_build_object('action','create_campaign','team_id',current_setting('hardening.team'),'name','QA Hold','kind','seasonal','objective','','audience','','message','','start_date',null,'end_date',null))->>'id',true);

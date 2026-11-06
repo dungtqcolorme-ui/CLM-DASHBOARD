@@ -25,9 +25,11 @@ export async function POST(request: Request) {
     if (origin && origin !== new URL(request.url).origin) throw new MarketingError("Nguồn yêu cầu không hợp lệ.", 403, "forbidden");
     const command = parseMarketingCommand(await readBoundedJson(request));
     if (["create_team", "set_member"].includes(command.action) && !profile.roles.includes("Admin")) throw new MarketingError("Chỉ Admin có thể quản lý team Marketing.", 403, "forbidden");
-    if (["activate_campaign", "pause_campaign", "resume_campaign", "complete_campaign", "archive_campaign", "request_changes"].includes(command.action) && !profile.roles.some((role) => role === "Admin" || role === "PR Leader")) throw new MarketingError("Thao tác này cần PR Leader hoặc Admin.", 403, "forbidden");
+    if (["activate_campaign", "pause_campaign", "resume_campaign", "complete_campaign", "archive_campaign", "request_changes", "confirm_kpi_revision"].includes(command.action) && !profile.roles.some((role) => role === "Admin" || role === "PR Leader")) throw new MarketingError("Thao tác này cần PR Leader hoặc Admin.", 403, "forbidden");
     // A user-JWT transaction repeats all authorization and version checks at the data boundary.
-    const { data, error } = await client.rpc("marketing_command", { p_command: command });
+    const rpc = command.action === "propose_kpi_revision" || command.action === "confirm_kpi_revision"
+      ? "marketing_campaign_kpi_command" : "marketing_command";
+    const { data, error } = await client.rpc(rpc, { p_command: command });
     if (error) databaseError(error);
     return marketingResponse({ result: data });
   } catch (error) { return marketingErrorResponse(error); }

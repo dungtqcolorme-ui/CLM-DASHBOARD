@@ -55,7 +55,7 @@ test('A schema marker and configured settings never mark unavailable drivers as 
   const { readMarketingReadiness } = load('lib/marketing/readiness.ts');
   const env = Object.fromEntries(['META_APP_ID', 'META_APP_SECRET', 'META_GRAPH_VERSION', 'MARKETING_CREDENTIALS_KEY', 'MARKETING_WORKER_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'].map((name) => [name, 'fixture-secret-value']));
   env.LIVE_META_PUBLISH_ENABLED = 'true';
-  const result = await readMarketingReadiness({ rpc: async () => ({ data: '20261106000100' }) }, env);
+  const result = await readMarketingReadiness({ rpc: async () => ({ data: '20261106000200' }) }, env);
   assert.equal(result.schema, 'current');
   assert.equal(result.liveMetaRequested, true);
   assert.equal(result.integrations.meta.status, 'adapter_unavailable');

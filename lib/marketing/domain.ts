@@ -104,6 +104,17 @@ export function parseMarketingCommand(value: unknown): MarketingCommand {
     const fields = { name: string(input.name, "tên Campaign", 180, true), kind: choice(input.kind, ["seasonal", "always_on"], "loại Campaign"), objective: string(input.objective, "mục tiêu", 5000), audience: string(input.audience, "đối tượng", 5000), message: string(input.message, "thông điệp", 5000), start_date: start, end_date: end };
     return action === "create_campaign" ? { action, ...fields, team_id: uuid(input.team_id, "team") } : { action, ...fields, id: uuid(input.id, "Campaign"), expected_version: version(input.expected_version) };
   }
+  if (action === "propose_kpi_revision" || action === "confirm_kpi_revision") {
+    const base = { id: uuid(input.id, "Campaign"), expected_kpi_version: input.expected_kpi_version as number };
+    if (!Number.isInteger(base.expected_kpi_version) || base.expected_kpi_version < 0 || base.expected_kpi_version > 2147483646) invalid("phiên bản KPI");
+    if (action === "propose_kpi_revision") {
+      keys(input, ["action", "id", "expected_kpi_version", "reason", "targets"]);
+      return { action, ...base, reason: string(input.reason, "lý do điều chỉnh KPI", 2000, true), targets: kpis(input.targets) };
+    }
+    keys(input, ["action", "id", "expected_kpi_version", "confirmed"]);
+    if (input.confirmed !== true) invalid("xác nhận KPI");
+    return { action, ...base, confirmed: true };
+  }
   if (action === "update_plan") {
     keys(input, ["action", "id", "expected_version", "content_mix", "plan", "kpi_draft"]);
     return { action, id: uuid(input.id, "Campaign"), expected_version: version(input.expected_version), content_mix: validateContentMix(input.content_mix), plan: string(input.plan, "kế hoạch", 50000), kpi_draft: kpis(input.kpi_draft) };

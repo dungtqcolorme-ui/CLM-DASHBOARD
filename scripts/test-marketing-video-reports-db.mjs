@@ -10,7 +10,8 @@ const root = path.resolve(import.meta.dirname, '..');
 const moduleName = process.env.MARKETING_PGLITE_MODULE;
 const { PGlite } = await import(moduleName ? pathToFileURL(path.resolve(moduleName)).href : '@electric-sql/pglite');
 const db = new PGlite();
-const hardening = process.argv.includes('--hardening');
+const kpiRevisions = process.argv.includes('--kpi-revisions');
+const hardening = kpiRevisions || process.argv.includes('--hardening');
 try {
   await db.exec(`
     create role anon; create role authenticated; create role service_role bypassrls;
@@ -31,6 +32,7 @@ try {
 
     for (const file of files) await db.exec(await readFile(path.join(root, 'supabase/migrations', file), 'utf8'));
     if (hardening) await db.exec(await readFile(path.join(root, 'supabase/migrations/20261106000100_marketing_hardening.sql'), 'utf8'));
+    if (kpiRevisions) await db.exec(await readFile(path.join(root, 'supabase/migrations/20261106000200_marketing_kpi_revisions.sql'), 'utf8'));
   }
   for (const file of ['marketing_foundation.test.sql','marketing_knowledge.test.sql','marketing_creative.test.sql','marketing_publishing.test.sql']) {
     await db.exec(await readFile(path.join(root,'supabase/tests',file),'utf8'));
@@ -39,6 +41,10 @@ try {
   if (hardening) {
     await db.exec(await readFile(path.join(root, 'supabase/tests/marketing_hardening.test.sql'), 'utf8'));
     console.log('Marketing hardening SQL passed.');
+  }
+  if (kpiRevisions) {
+    await db.exec(await readFile(path.join(root,'supabase/tests/marketing_kpi_revisions.test.sql'),'utf8'));
+    console.log('Marketing KPI revision SQL passed.');
   }
   // Keep the rollback-only SQL fixture alive for actual parser -> RPC -> stored JSON checks.
   await db.exec((await readFile(path.join(root, 'supabase/tests/marketing_video_reports.test.sql'), 'utf8')).replace(/rollback;\s*$/, ''));

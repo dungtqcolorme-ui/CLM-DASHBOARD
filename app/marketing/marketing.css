@@ -10,3 +10,8 @@
 .mk-root .mk-dialog{border:0;padding:0;border-radius:12px;width:min(680px,calc(100vw - 32px));max-height:85dvh;overflow:auto;margin:auto;background:#fff;color:var(--mk-ink);box-shadow:0 25px 100px #0003}.mk-dialog::backdrop{background:#23202988}.mk-dialog>.mk-panel{margin:0;border:0}
 
 .mk-root .mk-table small,.mk-root .mk-badge,.mk-root .mk-save-state,.mk-root .mk-eyebrow,.mk-root .mk-calendar-item>span:first-child,.mk-root .mk-calendar-item strong{font-size:12px}.mk-root .mk-calendar-item{font-size:12px}.mk-calendar-grid{grid-template-columns:repeat(7,minmax(116px,1fr));min-width:842px}.mk-root .mk-nav-child{padding-left:20px;font-size:12px}
+
+.mk-kpi-confirm { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.mk-kpi-confirm input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 0; flex: 0 0 18px; }
+.mk-kpi-input { display: grid; grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 10px; }
+@media (max-width: 720px) { .mk-kpi-input { grid-template-columns: 1fr; } }
