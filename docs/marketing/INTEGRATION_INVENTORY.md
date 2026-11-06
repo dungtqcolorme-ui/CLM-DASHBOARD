@@ -62,3 +62,7 @@ Phase 3 additionally consulted current [private bucket documentation](https://su
 | Noto Sans | Bundled TTF and SIL OFL 1.1. Hash and upstream URLs in `public/marketing/fonts/SOURCE.txt`. | PDF fallback for Vietnamese. Official dashboard logo stays at its source aspect ratio. |
 | FFmpeg CLI | Existing 9.0.1 binary reports GPL-3.0-or-later build. | Generates a synthetic local test clip only. The app uses native browser media playback. Worker selection and production licensing remain pending. |
 | Remotion, HyperFrames, STT | No app dependency or provider enabled. | Manual timeline and native preview. Worker status remains `not_configured`. |
+
+## Phase 6 dependency update
+
+Next.js and eslint-config-next use 16.4.5, React and React DOM use 19.3.1. Updated transitive pins are recorded in `pnpm-workspace.yaml`. The installed frozen lockfile matches the one audited with zero advisories on 06/11/2026. See `PHASE6_REPORT.md` for version sources and validation.

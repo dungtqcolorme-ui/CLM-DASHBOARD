@@ -4,7 +4,41 @@ const report=()=>({id,team_id:id,campaign_id:null,kind:'weekly',title:'Báo cáo
 let exp={};try{exp=routeLoader({})('lib/marketing/report-export.ts');}catch(e){if(e.code!=='ENOENT')throw e;}
 test('PDF export is real binary with embedded Vietnamese font and Unicode mapping',async()=>{assert.equal(typeof exp.exportReportPdf,'function');const bytes=await exp.exportReportPdf(report(),'internal');assert.equal(bytes.subarray(0,5).toString(),'%PDF-');const text=bytes.toString('latin1');assert.match(text,/\/FontFile2/);assert.match(text,/\/ToUnicode/);assert.ok(bytes.length>5000);});
 test('XLSX export readback retains null labels/numeric zero and writes user narrative as literal text without formulas/hyperlinks',async()=>{assert.equal(typeof exp.exportReportXlsx,'function');const r=report(),bytes=await exp.exportReportXlsx(r,'internal');assert.equal(bytes.subarray(0,2).toString(),'PK');const wb=new ExcelJS.Workbook();await wb.xlsx.load(bytes);const values=[];wb.eachSheet(sheet=>sheet.eachRow(row=>row.eachCell(cell=>{assert.notEqual(cell.type,ExcelJS.ValueType.Formula);assert.notEqual(cell.type,ExcelJS.ValueType.Hyperlink);values.push(cell.value);})));assert.ok(values.includes('Chưa có dữ liệu'));assert.ok(values.includes(0));assert.ok(values.includes(r.narrative));assert.ok(values.some(x=>typeof x==='string'&&x.includes('NỘI BỘ')));});
-function fixture(approved){const r=report();const client={from(table){const filters=[];const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},maybeSingle(){return q;},then(resolve){const row=table==='marketing_report_versions'?{report_id:id,version:2,snapshot:r}:approved?{report_id:id,report_version:2,metrics_hash:r.metrics_hash,narrative_hash:createHash('sha256').update(r.narrative).digest('hex')}:null;return Promise.resolve({data:row&&filters.every(([k,v])=>row[k]===v)?row:null,error:null}).then(resolve);}};return q;}};const load=routeLoader({'@/lib/dashboardSession':{getDashboardRequestIdentity:async request=>{if(request.headers.get('authorization')!=='Bearer valid')throw Object.assign(Error('private'),{status:401});return {profile:{id,roles:['PR Representative']},client};}}});let route={};try{route=load('app/api/marketing/reports/export/route.ts');}catch(e){if(e.code!=='ENOENT')throw e;}return route;}
+function fixture(approved, budgetError = null, revokeOnReserve = false) {
+  const r = report();
+  let hasAccess = true;
+  const client = {
+    async rpc(name) {
+      assert.equal(name, 'marketing_reserve_report_export');
+      if (revokeOnReserve) hasAccess = false;
+      return { error: budgetError };
+    },
+    from(table) {
+      const filters = [];
+      const query = {
+        select() { return query; },
+        eq(key, value) { filters.push([key, value]); return query; },
+        maybeSingle() { return query; },
+        then(resolve) {
+          const approval = approved ? {
+            report_id: id, report_version: 2, metrics_hash: r.metrics_hash,
+            narrative_hash: createHash('sha256').update(r.narrative).digest('hex'),
+          } : null;
+          const row = table === 'marketing_report_versions' ? { report_id: id, version: 2, snapshot: r } : approval;
+          const data = hasAccess && row && filters.every(([key, value]) => row[key] === value) ? row : null;
+          return Promise.resolve({ data, error: null }).then(resolve);
+        },
+      };
+      return query;
+    },
+  };
+  return routeLoader({ '@/lib/dashboardSession': {
+    getDashboardRequestIdentity: async (request) => {
+      if (request.headers.get('authorization') !== 'Bearer valid') throw Object.assign(Error('private'), { status: 401 });
+      return { profile: { id, roles: ['PR Representative'] }, client };
+    },
+  } })('app/api/marketing/reports/export/route.ts');
+}
 test('Report export endpoint verifies identity, exact audience/version approval and does not cache private bytes',async()=>{const route=fixture(false);assert.equal(typeof route.GET,'function');const query='?id='+id+'&version=2&audience=internal&format=pdf';assert.equal((await route.GET(new Request('https://clm.example/api/marketing/reports/export'+query))).status,401);const request=(q)=>new Request('https://clm.example/api/marketing/reports/export'+q,{headers:{Authorization:'Bearer valid'}});const internal=await route.GET(request(query));assert.equal(internal.status,200);assert.equal(internal.headers.get('content-type'),'application/pdf');assert.match(internal.headers.get('cache-control'),/no-store/);assert.equal((await route.GET(request(query.replace('internal','external')))).status,403);assert.equal((await fixture(true).GET(request(query.replace('internal','external')))).status,200);});
 
 // Read the single embedded-font PDFKit text streams through their actual ToUnicode map.
@@ -23,4 +57,23 @@ test('PDF and XLSX readback distinguish unknown historical reviews, snapshot tim
  const evidence=[];wb.getWorksheet('Quan sát nguồn').eachRow(row=>row.eachCell(cell=>{assert.notEqual(cell.type,ExcelJS.ValueType.Formula);assert.notEqual(cell.type,ExcelJS.ValueType.Hyperlink);evidence.push(cell.value);}));
  for(const value of [r.metrics.organic.observations[0].id,r.metrics.organic.observations[0].fetched_at,r.metrics.organic.observations[0].source_reference,r.metrics.organic.observations[0].definitions.reach])assert.ok(evidence.includes(value));
  const summary=[];wb.getWorksheet('Tổng quan').eachRow(row=>summary.push(row.values));assert.ok(summary.some(row=>row[1]==='Chốt báo cáo UTC'&&row[2]===r.metrics.as_of));
+});
+
+test('Report export respects the actor budget before generating bytes', async () => {
+  const route=fixture(true,{code:'P0429',message:'private counter'});
+  const response=await route.GET(new Request('https://clm.example/api/marketing/reports/export?id='+id+'&version=2&audience=external&format=pdf',{headers:{Authorization:'Bearer valid'}}));
+  assert.equal(response.status,429);
+  assert.match(response.headers.get('content-type'),/application\/json/);
+  const body=await response.json();
+  assert.equal(body.code,'rate_limited');
+  assert.doesNotMatch(JSON.stringify(body),/private counter/);
+});
+
+test('Report export re-evaluates scoped access after the budget reservation', async () => {
+  const route = fixture(true, null, true);
+  const response = await route.GET(new Request('https://clm.example/api/marketing/reports/export?id='+id+'&version=2&audience=internal&format=xlsx', {
+    headers: { Authorization: 'Bearer valid' },
+  }));
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).code, 'not_found');
 });

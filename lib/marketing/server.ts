@@ -16,6 +16,7 @@ export function databaseError(error: { code?: string } | null): never {
   if (["42P01", "42883", "PGRST202", "PGRST205"].includes(code ?? "")) {
     throw new MarketingError("Marketing chưa được khởi tạo trên database này. Admin cần áp dụng migration Marketing trên môi trường đã chọn.", 503, "schema_unavailable");
   }
+  if (code === "P0429") throw new MarketingError("Đã đến giới hạn thao tác trong phút này. Vui lòng thử lại sau.", 429, "rate_limited");
   if (code === "40001" || code === "23505") throw new MarketingError("Dữ liệu đã thay đổi. Giữ bản đang chỉnh và tải phiên bản mới trước khi thử lại.", 409, "conflict");
   if (code === "42501" || code === "PGRST301") throw new MarketingError("Bạn không có quyền thực hiện thao tác này hoặc quyền truy cập đã thay đổi.", 403, "forbidden");
   if (["22023", "23514", "23503", "22P02", "22007", "22008"].includes(code ?? "")) throw new MarketingError("Dữ liệu hoặc trạng thái không hợp lệ. Kiểm tra các trường và phiên bản hiện tại.", 400, "invalid_input");

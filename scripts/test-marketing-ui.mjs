@@ -37,6 +37,7 @@ await db.exec(await readFile('supabase/migrations/20261104000200_marketing_knowl
 await db.exec(await readFile('supabase/migrations/20261104000300_marketing_creative.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261105000100_marketing_publishing.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261105000200_marketing_video_reports.sql','utf8'));
+await db.exec(await readFile('supabase/migrations/20261106000100_marketing_hardening.sql','utf8'));
 const actors=['Admin','PR Representative','PR Leader','Viewer'].map((role,i)=>({id:`${i+1}1111111-1111-4111-8111-111111111111`,email:`qa-${i}@example.test`,fullName:`Kiểm thử ${role}`,status:'active',roles:[role],createdAt:'2026-11-04T00:00:00Z',updatedAt:'2026-11-04T00:00:00Z'}));
 for(const actor of actors){await db.query('insert into profiles values($1,$2,$3,$4)',[actor.id,actor.email,actor.status,actor.fullName]);await db.query('insert into user_roles values($1,$2)',[actor.id,actor.roles[0]]);}
 const expiresAt=Math.floor(Date.now()/1000)+86400;
@@ -51,21 +52,22 @@ async function asActor(actor,sql,args=[]){return db.transaction(async tx=>{await
 function clientFor(actor){return {
  from(table){assert.match(table,/^marketing_[a-z_]+$/);let columns='*',order=[],filters=[],start=0,end=499,one=false;const q={select(value){columns=value;return q;},eq(key,value){assert.match(key,/^[a-z_]+$/);filters.push([key,value]);return q;},maybeSingle(){one=true;return q;},order(key,options){assert.match(key,/^[a-z_]+$/);order.push('"'+key+'" '+(options?.ascending===false?'desc':'asc'));return q;},range(from,to){start=from;end=to;return q;},then(resolve,reject){return (async()=>{try{assert.match(columns,/^[a-z_,*]+$/);const where=filters.length?' where '+filters.map(([key],i)=>`"${key}"=$${i+1}`).join(' and '):'',values=filters.map(([,v])=>v);const result=await asActor(actor,`select to_jsonb(marketing_row) as value from (select ${columns} from public.${table}${where}${order.length?' order by '+order.join(','):''} limit $${values.length+1} offset $${values.length+2}) marketing_row`,[...values,end-start+1,start]);const count=await asActor(actor,`select count(*)::int as total from public.${table}${where}`,values);return {data:one?(result.rows[0]?.value??null):result.rows.map(row=>row.value),error:null,count:count.rows[0].total};}catch(error){return {data:null,error};}})().then(resolve,reject);}};return q;},
  storage:{from(bucket){assert.ok(['marketing-originals','marketing-footage'].includes(bucket));return {async upload(path,bytes,options){assert.equal(options.upsert,false);try{await asActor(actor,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',[bucket,path,JSON.stringify({size:bytes.length,mimetype:options.contentType})]);storedBytes.set(path,Buffer.from(bytes));return {data:{path},error:null};}catch(error){return {data:null,error};}},async createSignedUrl(path,ttl){assert.equal(ttl,60);assert.equal(bucket,'marketing-footage');try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);if(!rows.rows.length||!storedBytes.has(path))throw Error('Private footage unavailable');const token=randomUUID();signedFootage.set(token,{actor,path,expires:Date.now()+ttl*1000});return {data:{signedUrl:base+'/qa-footage/'+token},error:null};}catch(error){return {data:null,error};}},async download(path){try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);const bytes=rows.rows.length?storedBytes.get(path):null;if(!bytes)throw new Error('Private object unavailable');return {data:new Blob([bytes]),error:null};}catch(error){return {data:null,error};}}};}},
- async rpc(name,args){assert.ok(['marketing_command','marketing_knowledge_command','marketing_creative_command','marketing_publishing_command','marketing_video_command','marketing_report_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
+ async rpc(name,args){if(['marketing_readiness_probe','marketing_reserve_report_export'].includes(name)){try{const result=await asActor(actor,`select public.${name}() as value`);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}assert.ok(['marketing_command','marketing_knowledge_command','marketing_creative_command','marketing_publishing_command','marketing_video_command','marketing_report_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
 };}
 const load=routeLoader({'@/lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'marketing_publishing_gateway_command');try{return {data:await serviceCommand(args.p_command),error:null};}catch(error){return {data:null,error};}}})},'@/lib/dashboardSession':{getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
 const api=load('app/api/marketing/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
 const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
-const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
+const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export','readiness'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
 const env=await readFile('.env.local','utf8');const supabaseUrl=env.match(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)?.[1];
 assert.ok(supabaseUrl,'Public Supabase URL is required for the client SDK storage key');const storageKey=`sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 const browser=await playwright.chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});
-const report={scope:phase5Only?'phase5-focused':'all-phases',checks:[],screenshots:[],errors:[],externalBlocked:0,commands:[],gatewayActions,legacyShellLoads:0,storageFixture:'In-memory Storage HTTP simulation with actual browser File bytes and disposable PostgreSQL metadata/RLS. Chromium multipart File bytes forwarded locally for the fixture; hosted Storage untested.'};
+const report={stageDurationsMs:{},scope:phase5Only?'phase5-focused':'all-phases',checks:[],screenshots:[],errors:[],externalBlocked:0,commands:[],gatewayActions,legacyShellLoads:0,storageFixture:'In-memory Storage HTTP simulation with actual browser File bytes and disposable PostgreSQL metadata/RLS. Chromium multipart File bytes forwarded locally for the fixture; hosted Storage untested.'};
 let lastPage;let stage='initializing';
 let planGate=null;
-const checkpoint=value=>{stage=value;console.log('QA:',value);};
+let stageStarted=performance.now();
+const checkpoint=value=>{report.stageDurationsMs[stage]=Math.round(performance.now()-stageStarted);stageStarted=performance.now();stage=value;console.log('QA:',value);};
 const watchdog=setInterval(()=>console.log('QA pending:',stage),15000);watchdog.unref();
 async function context(actor,viewport={width:1440,height:1000}){
  const ctx=await browser.newContext({viewport,reducedMotion:'reduce'});
@@ -149,8 +151,10 @@ try{
  await p.getByRole('button',{name:'Overview',exact:true}).click();await p.getByRole('button',{name:'Content Plan',exact:true}).click();
  await p.getByLabel('Kế hoạch chung').fill('Dữ liệu kiểm thử: giữ bản B mới');gate.release.resolve();
  await p.getByText('Phát hiện phiên bản mới. Thay đổi của bạn được giữ.',{exact:true}).waitFor();
- await p.getByRole('button',{name:'Overview',exact:true}).click();await p.getByRole('button',{name:'Content Plan',exact:true}).click();assert.equal(await p.getByLabel('Kế hoạch chung').inputValue(),'Dữ liệu kiểm thử: giữ bản B mới');
- await p.getByText('Phát hiện phiên bản mới. Thay đổi của bạn được giữ.',{exact:true}).waitFor();await shot(p,'plan-conflict');
+ await p.getByRole('button',{name:'Overview',exact:true}).click();await p.getByRole('button',{name:'Content Plan',exact:true}).click();
+ // The field mounts before the session draft is restored and its conflict is detected.
+ await p.getByText('Phát hiện phiên bản mới. Thay đổi của bạn được giữ.',{exact:true}).waitFor();
+ assert.equal(await p.getByLabel('Kế hoạch chung').inputValue(),'Dữ liệu kiểm thử: giữ bản B mới');await shot(p,'plan-conflict');
  await p.getByRole('button',{name:'Lấy phiên bản mới',exact:true}).click();await p.getByRole('button',{name:/Dùng phiên bản máy chủ v/}).click();
  report.checks.push('Delayed autosave across remount cannot delete newer draft; conflict recovery explicit');
  await p.getByRole('button',{name:'Overview',exact:true}).click();await p.getByRole('button',{name:'Gửi yêu cầu kích hoạt',exact:true}).click();await p.getByRole('button',{name:'Kích hoạt & xác nhận KPI',exact:true}).waitFor();await p.getByRole('button',{name:'Kích hoạt & xác nhận KPI',exact:true}).click();await p.getByRole('button',{name:'Tạm dừng',exact:true}).waitFor();
@@ -178,6 +182,19 @@ try{
  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=0x184857:s=320x180:r=24:d=3','-f','lavfi','-i','sine=frequency=440:duration=3','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart','-y',footagePath]);
  await testVideoReportsWorkflow({page:p,db,base,actors,team,campaign,shot,commandVideo:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/video'),commandReports:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/reports'),mainCommand:cmd,serviceCommand,reportIngest,context,report,footagePath});lastPage=p;
  if(!phase5Only){
+ checkpoint('Phase6 Admin readiness');
+ const realHttp=await playwright.request.newContext({baseURL:base});
+ try{
+  const denied=await realHttp.get('/api/marketing/reports/export');
+  assert.equal(denied.status(),401);
+  assert.equal((await denied.json()).code,'unauthorized');
+ }finally{await realHttp.dispose();}
+ await p.goto(base+'/marketing');
+ await p.getByRole('button',{name:'Kiểm tra trạng thái',exact:true}).click();
+ await p.getByText(/Đã nhận diện migration Marketing/).waitFor();
+ await p.getByText(/Meta · Chưa có bộ kết nối đã xác minh/).waitFor();
+ await shot(p,'marketing-readiness-phase6');
+ report.checks.push('Admin readiness uses current SQL marker and reports unavailable integrations explicitly');
  checkpoint('eight routes');
  const titles={overview:'Marketing Overview',campaigns:'Campaigns',agent:'AI Agent & Ideas',studio:'Creative Studio',calendar:'Content Calendar',assets:'Asset & Template Library',intelligence:'Intelligence & Reports',approvals:'Approval Inbox'};
  for(const [path,name] of [['','overview'],['/campaigns','campaigns'],['/agent','agent'],['/studio','studio'],['/calendar','calendar'],['/assets','assets'],['/intelligence','intelligence'],['/approvals','approvals']]){
@@ -188,7 +205,7 @@ try{
  await p.getByRole('button',{name:'Marketing',exact:true}).click();assert.equal(await p.locator('#marketing-subnav').isVisible(),false);await p.getByRole('button',{name:'Marketing',exact:true}).press('Enter');assert.equal(await p.locator('#marketing-subnav').isVisible(),true);
  await p.setViewportSize({width:390,height:844});for(const path of ['/marketing','/marketing/calendar','/marketing/studio','/marketing/approvals']){await p.goto(base+path);await p.getByRole('heading',{name:titles[path==='/marketing'?'overview':path.split('/').pop()],exact:true}).waitFor();assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'No mobile overflow '+path);await shot(p,path.split('/').pop()+'-mobile');}
  report.checks.push('Keyboard disclosure, reduced motion, mobile 390px without page overflow');
- const viewer=await context(actors[3]);await viewer.page.goto(base+'/marketing/campaigns');await viewer.page.getByText('Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.').waitFor();assert.equal(await viewer.page.getByRole('button',{name:'+ Tạo Campaign'}).count(),0);await viewer.ctx.close();
+ const viewer=await context(actors[3]);await viewer.page.goto(base+'/marketing/campaigns');await viewer.page.getByText('Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.').waitFor();assert.equal(await viewer.page.getByRole('button',{name:'+ Tạo Campaign'}).count(),0);assert.equal(await viewer.page.evaluate(async token=>(await fetch('/api/marketing/readiness',{headers:{Authorization:'Bearer '+token}})).status,tokenFor(actors[3])),403);await viewer.ctx.close();
  const rep=await context(actors[1]);await rep.page.goto(base+'/marketing/campaigns/'+campaign.id);await rep.page.locator('#marketing-main h1').waitFor();assert.equal(await rep.page.getByRole('button',{name:'Tạm dừng',exact:true}).count(),0);await rep.ctx.close();report.checks.push('Viewer write controls absent; Representative activation controls absent');
  // Persistent host fixture verifies actual app route/iframe lifecycle, not legacy business logic.
  const host=await context(actors[0]);await host.page.goto(base+'/');const frame=host.page.frameLocator('iframe.private-dashboard-frame');await frame.getByLabel('Dữ liệu đang nhập').fill('Giữ nguyên form chưa lưu');await frame.locator('#open-marketing').click();await host.page.getByRole('heading',{name:'Marketing Overview',exact:true}).waitFor();await host.page.getByRole('link',{name:'Đối ngoại',exact:true}).click();await frame.getByLabel('Dữ liệu đang nhập').waitFor();assert.equal(await frame.getByLabel('Dữ liệu đang nhập').inputValue(),'Giữ nguyên form chưa lưu');assert.equal(report.legacyShellLoads,1);await host.ctx.close();report.checks.push('Legacy iframe and unsaved input survive Marketing roundtrip, one shell load');
@@ -202,4 +219,4 @@ try{
  }
  assert.deepEqual(report.errors,[]);assert.equal((await db.query("select count(*)::int n from marketing_content_items where publishing_status in ('approved','scheduled','published')")).rows[0].n,0);
  await admin.ctx.close();console.log(JSON.stringify(report,null,2));
-}catch(error){report.failureUrl=lastPage?.url();report.errors.push(error.stack||String(error));console.error('Failure URL:',report.failureUrl,error);if(lastPage&&!lastPage.isClosed())await shot(lastPage,'failure').catch(()=>{});throw error;}finally{clearInterval(watchdog);await writeFile(resolve(out,'qa-report.json'),JSON.stringify(report,null,2));await browser.close();await db.close();}
+}catch(error){report.failureUrl=lastPage?.url();report.errors.push(error.stack||String(error));console.error('Failure URL:',report.failureUrl,error);if(lastPage&&!lastPage.isClosed())await shot(lastPage,'failure').catch(()=>{});throw error;}finally{report.stageDurationsMs[stage]=Math.round(performance.now()-stageStarted);clearInterval(watchdog);await writeFile(resolve(out,'qa-report.json'),JSON.stringify(report,null,2));await browser.close();await db.close();}

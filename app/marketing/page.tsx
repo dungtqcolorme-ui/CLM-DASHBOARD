@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CampaignRows, Capability, ContentRows, Field, PageHeader, Panel } from "./components";
 import { useMarketing } from "./workspace";
+import { ReadinessPanel } from "./readiness-panel";
 
 export default function OverviewPage() {
   const { data, selected, canWrite, admin, href } = useMarketing();
@@ -13,7 +14,7 @@ export default function OverviewPage() {
   return <><PageHeader title="Marketing Overview" description="Cùng team đưa ý tưởng thành nội dung có kế hoạch, có người phụ trách và đúng quy trình." action={canWrite && <Link className="mk-button mk-primary" href={href("/marketing/campaigns?create=1")}>+ Tạo Campaign</Link>} />
   <div className="mk-metrics">{[["Campaign hoạt động", campaigns.filter((c) => c.status === "active").length, "Đã được kích hoạt"], ["Nội dung bản nháp", items.filter((i) => ["draft", "changes_requested"].includes(i.publishing_status)).length, "Đang chuẩn bị trong ứng dụng"], ["Đang chờ duyệt", items.filter((i) => i.publishing_status === "in_review").length, "Chờ người khác kiểm tra"], ["Đã lên lịch / xuất bản", items.filter((i) => ["scheduled", "published"].includes(i.publishing_status)).length, "Chỉ tính trạng thái đã ghi nhận"]].map(([label, value, help]) => <div className="mk-metric" key={label}><span>{label}</span><strong>{value}</strong><small>{help}</small></div>)}</div>
   <div className="mk-columns"><div className="mk-stack"><Panel title="Campaign của team" action={<Link href={href("/marketing/campaigns")}>Xem tất cả →</Link>}><CampaignRows campaigns={campaigns.slice(0, 5)} /></Panel><Panel title="Việc cần xử lý"><div className="mk-summary-row"><span>Nội dung trễ hạn sản xuất</span><strong>{late.length}</strong></div><ContentRows items={late.slice(0, 4)} /></Panel><Panel title="Bản nháp gần đây"><ContentRows items={[...items].filter((i) => ["draft", "changes_requested"].includes(i.publishing_status)).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 4)} /></Panel></div><div className="mk-stack"><Panel title="Dữ liệu & kết nối"><Capability name="meta" /><p className="mk-muted">Organic reach, engagement và xu hướng: chưa có dữ liệu xác minh. Không thay thế dữ liệu thiếu bằng số 0.</p><Capability name="agent" /></Panel><Panel title="Lịch sắp tới"><ContentRows items={[...items].filter((i) => i.proposed_publish_at && new Date(i.proposed_publish_at).getTime() >= now).sort((a, b) => (a.proposed_publish_at || "").localeCompare(b.proposed_publish_at || "")).slice(0, 3)} /><Link className="mk-text-link" href={href("/marketing/calendar")}>Mở Content Calendar →</Link></Panel></div></div>
-  {admin && <AdminSetup />}</>;
+  {admin && <><AdminSetup /><ReadinessPanel /></>}</>;
 }
 
 function AdminSetup() {
