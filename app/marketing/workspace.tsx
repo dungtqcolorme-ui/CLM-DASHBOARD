@@ -8,6 +8,8 @@ import type { MarketingCommand, MarketingWorkspace } from "@/lib/marketing/types
 import { MARKETING_NAV, isMarketingActive } from "@/lib/marketing/navigation";
 import { reconcileCampaignNavigation } from "./campaign-context";
 import { clearSceneDrafts } from "./creative/draft-state";
+import { phaseFiveScope } from "./video/access-scope";
+import { phaseFiveDraftCache } from "./video/draft-access";
 
 const legacy = [["doingoai", "Đối ngoại"], ["truyenthong", "Truyền thông"], ["anpham", "Ấn phẩm"], ["hocbong", "Học bổng"], ["baocao", "Hiệu suất"], ["phoihop", "Task hàng ngày"], ["tailieu", "Tài liệu"]];
 export class MarketingError extends Error {
@@ -17,7 +19,8 @@ type WorkspaceContext = {
   data: MarketingWorkspace; refresh: () => Promise<void>;
   command: <T = Record<string, unknown>>(command: MarketingCommand) => Promise<T>;
   selected: string; select: (id: string) => void; embedded: boolean;
-  canWrite: boolean; manager: boolean; admin: boolean; href: (path: string) => string;
+  canWrite: boolean; manager: boolean; admin: boolean; phaseFiveAccessVersion: number;
+  invalidateAccess: (message: string, status: number) => void; href: (path: string) => string;
 };
 const Context = createContext<WorkspaceContext | null>(null);
 export function useMarketing() { const ctx = useContext(Context); if (!ctx) throw new Error("Marketing workspace unavailable"); return ctx; }
@@ -30,7 +33,9 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true); const [embedded, setEmbedded] = useState(true);
   const [selected, setSelected] = useState(""); const [open, setOpen] = useState(true); const [mobile, setMobile] = useState(false);
   const authGeneration = useRef(0);
-  const invalidate = useCallback((message: string, status: number) => { authGeneration.current += 1; clearSceneDrafts(); setData(null); setError(message); setUnauthorized(status === 401); setLoading(false); }, []);
+  const workspaceIdentity = useRef<string | null>(null);
+  const [phaseFiveAccessVersion, setPhaseFiveAccessVersion] = useState(0);
+  const invalidate = useCallback((message: string, status: number) => { authGeneration.current += 1; workspaceIdentity.current = null; clearSceneDrafts(); phaseFiveDraftCache.clear(); setData(null); setError(message); setUnauthorized(status === 401); setLoading(false); }, []);
   const refresh = useCallback(async () => {
     const generation = authGeneration.current;
     const { data: auth } = await getSupabaseClient().auth.getSession();
@@ -39,6 +44,8 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
     const body = await response.json();
     if (generation !== authGeneration.current) return;
     if (!response.ok) { if ([401, 403].includes(response.status)) invalidate(body.error || "Quyền truy cập đã thay đổi.", response.status); throw new MarketingError(body.error || "Không thể tải không gian Marketing.", response.status); }
+    workspaceIdentity.current = body.profile.id;
+    setPhaseFiveAccessVersion(phaseFiveDraftCache.observe(phaseFiveScope(body)));
     setData(body); setError(""); setUnauthorized(false);
   }, [invalidate]);
   const load = useCallback(async () => { setLoading(true); try { await refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Không thể tải dữ liệu."); setUnauthorized(e instanceof MarketingError && e.status === 401); } finally { setLoading(false); } }, [refresh]);
@@ -49,7 +56,7 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
     try { setSelected(sessionStorage.getItem("clm-marketing-campaign") || ""); } catch { /* Storage may be unavailable in private contexts. */ }
     void load();
     let unsubscribe: (() => void) | undefined;
-    try { const { data: listener } = getSupabaseClient().auth.onAuthStateChange((event) => { if (event === "SIGNED_OUT") invalidate("Phiên đăng nhập đã kết thúc.", 401); }); unsubscribe = () => listener.subscription.unsubscribe(); } catch { /* load reports environment configuration failures. */ }
+    try { const { data: listener } = getSupabaseClient().auth.onAuthStateChange((event, session) => { if (event === "SIGNED_OUT") invalidate("Phiên đăng nhập đã kết thúc.", 401); else if (session && workspaceIdentity.current && session.user.id !== workspaceIdentity.current) invalidate("Phiên đăng nhập đã thay đổi.", 401); }); unsubscribe = () => listener.subscription.unsubscribe(); } catch { /* load reports environment configuration failures. */ }
     return () => unsubscribe?.();
   }, [load, invalidate]);
   useEffect(() => { setOpen(true); setMobile(false); }, [pathname]);
@@ -90,7 +97,7 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
     </aside></>}
     <div className="mk-content"><header className="mk-topbar"><div><span className="mk-eyebrow">COLORME PARTNERSHIP</span><p>Marketing <span aria-hidden="true">/</span> {active.label}</p></div>{data && <label className="mk-context">Campaign hiện tại<select value={safeSelected} onChange={(e) => { const id = e.target.value; select(id); if (/^\/marketing\/campaigns\/[^/]+$/.test(pathname)) router.push(id ? `/marketing/campaigns/${id}` : "/marketing/campaigns"); else { const url = new URL(window.location.href); if (pathname === "/marketing/studio") url.searchParams.delete("content"); if (id) url.searchParams.set("campaign", id); else url.searchParams.delete("campaign"); router.replace(url.pathname + url.search); } }}><option value="">Tất cả Campaign</option>{data.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}</header>
       <main id="marketing-main" className="mk-main" tabIndex={-1}>
-      {loading && !data ? <div className="mk-loading" role="status"><span className="mk-eyebrow">MARKETING WORKSPACE</span><h1>Đang mở không gian làm việc…</h1><div className="mk-skeleton" /><div className="mk-skeleton" /></div> : !data ? <section className="mk-empty"><Icon name="folder" /><h1>{unauthorized ? "Tiếp tục với tài khoản ColorME" : "Chưa thể mở Marketing"}</h1><p role="alert">{error}</p>{unauthorized ? <a className="mk-button mk-primary" target={embedded ? "_top" : undefined} href={`/?returnTo=${encodeURIComponent(pathname + window.location.search)}`}>Đăng nhập Dashboard</a> : <button onClick={() => void load()}>Thử lại</button>}</section> : <Context.Provider value={{ data, refresh, command, selected: safeSelected, select, embedded, canWrite, manager, admin, href }}>{error && <div className="mk-notice" role="alert">{error}<button onClick={() => void load()}>Thử tải lại</button></div>}{!canWrite && <div className="mk-notice">Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.</div>}{children}</Context.Provider>}
+      {loading && !data ? <div className="mk-loading" role="status"><span className="mk-eyebrow">MARKETING WORKSPACE</span><h1>Đang mở không gian làm việc…</h1><div className="mk-skeleton" /><div className="mk-skeleton" /></div> : !data ? <section className="mk-empty"><Icon name="folder" /><h1>{unauthorized ? "Tiếp tục với tài khoản ColorME" : "Chưa thể mở Marketing"}</h1><p role="alert">{error}</p>{unauthorized ? <a className="mk-button mk-primary" target={embedded ? "_top" : undefined} href={`/?returnTo=${encodeURIComponent(pathname + window.location.search)}`}>Đăng nhập Dashboard</a> : <button onClick={() => void load()}>Thử lại</button>}</section> : <Context.Provider value={{ data, refresh, command, selected: safeSelected, select, embedded, canWrite, manager, admin, phaseFiveAccessVersion, invalidateAccess: invalidate, href }}>{error && <div className="mk-notice" role="alert">{error}<button onClick={() => void load()}>Thử tải lại</button></div>}{!canWrite && <div className="mk-notice">Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.</div>}{children}</Context.Provider>}
       </main><footer className="mk-footer">Asia/Ho_Chi_Minh · Dữ liệu theo quyền truy cập · Meta chưa kết nối</footer>
     </div>
   </div>;

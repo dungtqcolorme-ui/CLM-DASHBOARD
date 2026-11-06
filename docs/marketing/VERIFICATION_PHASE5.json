@@ -1,0 +1,49 @@
+{
+  "scope": "phase5-focused",
+  "checks": [
+    "Deep link requires existing ColorME sign-in",
+    "Admin creates real persisted team and memberships",
+    "Phase 5 native playback used private Storage bytes with a source-time seek. Rights, trim, split, caption, lock, version history, draft conflict, variant and render NotConfigured persisted through API and SQL.",
+    "Phase 5 weekly/monthly reports used frozen production and Organic data with source timestamps and null metrics. Evidence feedback, separate Leader approval, authenticated PDF/XLSX signatures, exact-version invalidation, history, conflict and mobile Viewer passed."
+  ],
+  "screenshots": [
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/video-timeline-phase5.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/reports-organic-phase5.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/reports-viewer-mobile-phase5.png",
+    "/Users/chandung/Documents/CLM DB/CLM DASHBOARD/tmp/marketing/video-viewer-mobile-phase5.png"
+  ],
+  "errors": [],
+  "externalBlocked": 0,
+  "commands": [
+    "create_team",
+    "set_member",
+    "set_member",
+    "set_member",
+    "create_campaign",
+    "submit_activation",
+    "activate_campaign",
+    "create_content",
+    "reserve_video_source",
+    "complete_video_source",
+    "review_video_source",
+    "create_video_project",
+    "save_video_project",
+    "request_video_render",
+    "create_video_variant",
+    "save_video_project",
+    "save_video_project",
+    "save_video_project",
+    "build_report",
+    "feedback_insight",
+    "edit_report",
+    "approve_report_share",
+    "edit_report",
+    "edit_report",
+    "build_report"
+  ],
+  "gatewayActions": [
+    "save_connection"
+  ],
+  "legacyShellLoads": 0,
+  "storageFixture": "In-memory Storage HTTP simulation with actual browser File bytes and disposable PostgreSQL metadata/RLS. Chromium multipart File bytes forwarded locally for the fixture; hosted Storage untested."
+}

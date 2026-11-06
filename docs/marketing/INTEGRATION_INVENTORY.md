@@ -52,3 +52,13 @@ Phase 3 adds user-JWT private Supabase Storage uploads and native browser raster
 Current [Supabase RLS documentation](https://supabase.com/docs/guides/database/postgres/row-level-security) and [database functions documentation](https://supabase.com/docs/guides/database/functions) were consulted for policies, privileges and function security. The markdown changelog fetch was unavailable in the browser tool/restricted network; no compatibility claim relies on it. All adopted calls use the existing installed SDK and were exercised by API/SQL tests.
 
 Phase 3 additionally consulted current [private bucket documentation](https://supabase.com/docs/guides/storage/buckets/fundamentals) and [Storage access control](https://supabase.com/docs/guides/storage/security/access-control) through Supabase documentation search. Storage operations use existing SDK methods; deployed HTTP/policy integration remains unverified until staging acceptance.
+
+## Phase 5 additions
+
+| Component | Installed version and source | Decision |
+|---|---|---|
+| PDFKit | 0.20.2, MIT. [Upstream](https://github.com/foliojs/pdfkit) | Server-side PDF with embedded Vietnamese font and approved report snapshot. |
+| ExcelJS | 4.4.0, MIT. [Upstream](https://github.com/exceljs/exceljs) | Server-side XLSX. User content is written as literal strings. |
+| Noto Sans | Bundled TTF and SIL OFL 1.1. Hash and upstream URLs in `public/marketing/fonts/SOURCE.txt`. | PDF fallback for Vietnamese. Official dashboard logo stays at its source aspect ratio. |
+| FFmpeg CLI | Existing 9.0.1 binary reports GPL-3.0-or-later build. | Generates a synthetic local test clip only. The app uses native browser media playback. Worker selection and production licensing remain pending. |
+| Remotion, HyperFrames, STT | No app dependency or provider enabled. | Manual timeline and native preview. Worker status remains `not_configured`. |

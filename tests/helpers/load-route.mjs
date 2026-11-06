@@ -11,7 +11,7 @@ export function routeLoader(overrides){
     const path=resolve(root,file);
     if(cache.has(path))return cache.get(path).exports;
     const loadedModule={exports:{}};cache.set(path,loadedModule);
-    const js=ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+    const js=ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
     const localRequire=(id)=>{
       if(Object.hasOwn(overrides,id))return overrides[id];
       if(id==='server-only')return {};

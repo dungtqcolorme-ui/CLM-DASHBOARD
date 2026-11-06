@@ -1,4 +1,13 @@
 "use client";
-import { Capability, PageHeader, Panel } from "../components";
+
+import { PageHeader } from "../components";
 import { useMarketing } from "../workspace";
-export default function IntelligencePage() { const { data, selected } = useMarketing(); const items = data.contentItems.filter((i) => !selected || i.campaign_id === selected); return <><PageHeader title="Intelligence & Reports" description="Phân biệt tiến độ sản xuất trong ứng dụng và kết quả Organic được xác minh từ Partnership Page." /><div className="mk-columns"><Panel title="Tiến độ sản xuất thực tế"><dl className="mk-definition"><dt>Phạm vi</dt><dd>{selected ? data.campaigns.find((c) => c.id === selected)?.name : "Tất cả Campaign được phép xem"}</dd><dt>Tổng nội dung</dt><dd>{items.length}</dd><dt>Sẵn sàng sản xuất</dt><dd>{items.filter((i) => i.production_status === "ready").length}</dd><dt>Đang chờ duyệt</dt><dd>{items.filter((i) => i.publishing_status === "in_review").length}</dd></dl><p className="mk-muted">Tính từ trạng thái đã lưu, không phải chỉ số hiệu quả bài đăng.</p></Panel><Panel title="Partnership Organic Performance"><Capability name="meta" /><dl className="mk-definition"><dt>Reach / Engagement / Impressions</dt><dd>Chưa có dữ liệu</dd><dt>Độ mới dữ liệu / Sync coverage</dt><dd>Chưa đồng bộ</dd><dt>Paid / Boosted</dt><dd>Không dùng làm Organic baseline khi chưa phân tách được</dd></dl></Panel></div><Panel title="Insights & báo cáo"><p className="mk-muted">Phase 5 · Chưa có báo cáo tuần/tháng hoặc insight đủ dữ liệu. Xuất PDF/XLSX và duyệt chia sẻ bên ngoài chưa triển khai.</p></Panel></>; }
+import ReportsWorkspace from "../reports/workspace";
+
+export default function IntelligencePage() {
+  const { data, phaseFiveAccessVersion } = useMarketing();
+  return <>
+    <PageHeader title="Intelligence & Reports" description="Phân biệt tiến độ sản xuất trong ứng dụng và kết quả Organic được xác minh từ Partnership Page." />
+    <ReportsWorkspace key={phaseFiveAccessVersion} userId={data.profile.id} accessVersion={phaseFiveAccessVersion} />
+  </>;
+}

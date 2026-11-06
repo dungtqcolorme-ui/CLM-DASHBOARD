@@ -14,7 +14,10 @@ import {creativeOsFixture} from '../tests/fixtures/creative-os.mjs';
 import {testKnowledgeWorkflow} from './marketing-knowledge-ui-checks.mjs';
 import {testCreativeWorkflow} from './marketing-creative-ui-checks.mjs';
 import {testPublishingWorkflow} from './marketing-publishing-ui-checks.mjs';
+import {testVideoReportsWorkflow} from './marketing-video-reports-ui-checks.mjs';
+import {randomUUID} from 'node:crypto';
 
+const phase5Only=process.argv.includes('--phase5-only');
 const base=process.env.CLM_MARKETING_QA_URL||'http://localhost:3104';
 assert.match(base,/^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 const root=process.cwd(), out=resolve(root,'tmp/marketing');await mkdir(out,{recursive:true});
@@ -33,42 +36,77 @@ await db.exec(await readFile('supabase/migrations/20261104000100_marketing_found
 await db.exec(await readFile('supabase/migrations/20261104000200_marketing_knowledge.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261104000300_marketing_creative.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261105000100_marketing_publishing.sql','utf8'));
+await db.exec(await readFile('supabase/migrations/20261105000200_marketing_video_reports.sql','utf8'));
 const actors=['Admin','PR Representative','PR Leader','Viewer'].map((role,i)=>({id:`${i+1}1111111-1111-4111-8111-111111111111`,email:`qa-${i}@example.test`,fullName:`Kiểm thử ${role}`,status:'active',roles:[role],createdAt:'2026-11-04T00:00:00Z',updatedAt:'2026-11-04T00:00:00Z'}));
 for(const actor of actors){await db.query('insert into profiles values($1,$2,$3,$4)',[actor.id,actor.email,actor.status,actor.fullName]);await db.query('insert into user_roles values($1,$2)',[actor.id,actor.roles[0]]);}
 const expiresAt=Math.floor(Date.now()/1000)+86400;
 const tokenFor=actor=>Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:actor.id,role:'authenticated',aud:'authenticated',exp:expiresAt})).toString('base64url')+'.fixture';
 const tokens=new Map(actors.map(actor=>[tokenFor(actor),actor]));
 const storedBytes=new Map();
+const signedFootage=new Map();
 const gatewayActions=[];
 async function serviceCommand(command){gatewayActions.push(command.action);return db.transaction(async tx=>{await tx.exec('set local role service_role');await tx.query("select set_config('request.jwt.claim.sub','',true)");const result=await tx.query('select public.marketing_publishing_gateway_command($1::jsonb) as value',[JSON.stringify(command)]);return result.rows[0].value;});}
+async function reportIngest(observation){return db.transaction(async tx=>{await tx.exec('set local role service_role');await tx.query("select set_config('request.jwt.claim.sub','',true)");const result=await tx.query('select public.marketing_report_ingest_command($1::jsonb) as value',[JSON.stringify(observation)]);return result.rows[0].value;});}
 async function asActor(actor,sql,args=[]){return db.transaction(async tx=>{await tx.exec('set local role authenticated');await tx.query("select set_config('request.jwt.claim.sub',$1,true)",[actor.id]);return tx.query(sql,args);});}
 function clientFor(actor){return {
- from(table){assert.match(table,/^marketing_[a-z_]+$/);let columns='*',order=[],filters=[],start=0,end=499,one=false;const q={select(value){columns=value;return q;},eq(key,value){assert.match(key,/^[a-z_]+$/);filters.push([key,value]);return q;},maybeSingle(){one=true;return q;},order(key,options){assert.match(key,/^[a-z_]+$/);order.push('"'+key+'" '+(options?.ascending===false?'desc':'asc'));return q;},range(from,to){start=from;end=to;return q;},then(resolve,reject){return (async()=>{try{assert.match(columns,/^[a-z_,*]+$/);const where=filters.length?' where '+filters.map(([key],i)=>`"${key}"=$${i+1}`).join(' and '):'',values=filters.map(([,v])=>v);const result=await asActor(actor,`select ${columns} from public.${table}${where}${order.length?' order by '+order.join(','):''} limit $${values.length+1} offset $${values.length+2}`,[...values,end-start+1,start]);const count=await asActor(actor,`select count(*)::int as total from public.${table}${where}`,values);return {data:one?(result.rows[0]??null):result.rows,error:null,count:count.rows[0].total};}catch(error){return {data:null,error};}})().then(resolve,reject);}};return q;},
- storage:{from(bucket){assert.equal(bucket,'marketing-originals');return {async upload(path,bytes,options){assert.equal(options.upsert,false);try{await asActor(actor,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',[bucket,path,JSON.stringify({size:bytes.length,mimetype:options.contentType})]);storedBytes.set(path,Buffer.from(bytes));return {data:{path},error:null};}catch(error){return {data:null,error};}},async download(path){try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);const bytes=rows.rows.length?storedBytes.get(path):null;if(!bytes)throw new Error('Private object unavailable');return {data:new Blob([bytes]),error:null};}catch(error){return {data:null,error};}}};}},
- async rpc(name,args){assert.ok(['marketing_command','marketing_knowledge_command','marketing_creative_command','marketing_publishing_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
+ from(table){assert.match(table,/^marketing_[a-z_]+$/);let columns='*',order=[],filters=[],start=0,end=499,one=false;const q={select(value){columns=value;return q;},eq(key,value){assert.match(key,/^[a-z_]+$/);filters.push([key,value]);return q;},maybeSingle(){one=true;return q;},order(key,options){assert.match(key,/^[a-z_]+$/);order.push('"'+key+'" '+(options?.ascending===false?'desc':'asc'));return q;},range(from,to){start=from;end=to;return q;},then(resolve,reject){return (async()=>{try{assert.match(columns,/^[a-z_,*]+$/);const where=filters.length?' where '+filters.map(([key],i)=>`"${key}"=$${i+1}`).join(' and '):'',values=filters.map(([,v])=>v);const result=await asActor(actor,`select to_jsonb(marketing_row) as value from (select ${columns} from public.${table}${where}${order.length?' order by '+order.join(','):''} limit $${values.length+1} offset $${values.length+2}) marketing_row`,[...values,end-start+1,start]);const count=await asActor(actor,`select count(*)::int as total from public.${table}${where}`,values);return {data:one?(result.rows[0]?.value??null):result.rows.map(row=>row.value),error:null,count:count.rows[0].total};}catch(error){return {data:null,error};}})().then(resolve,reject);}};return q;},
+ storage:{from(bucket){assert.ok(['marketing-originals','marketing-footage'].includes(bucket));return {async upload(path,bytes,options){assert.equal(options.upsert,false);try{await asActor(actor,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',[bucket,path,JSON.stringify({size:bytes.length,mimetype:options.contentType})]);storedBytes.set(path,Buffer.from(bytes));return {data:{path},error:null};}catch(error){return {data:null,error};}},async createSignedUrl(path,ttl){assert.equal(ttl,60);assert.equal(bucket,'marketing-footage');try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);if(!rows.rows.length||!storedBytes.has(path))throw Error('Private footage unavailable');const token=randomUUID();signedFootage.set(token,{actor,path,expires:Date.now()+ttl*1000});return {data:{signedUrl:base+'/qa-footage/'+token},error:null};}catch(error){return {data:null,error};}},async download(path){try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);const bytes=rows.rows.length?storedBytes.get(path):null;if(!bytes)throw new Error('Private object unavailable');return {data:new Blob([bytes]),error:null};}catch(error){return {data:null,error};}}};}},
+ async rpc(name,args){assert.ok(['marketing_command','marketing_knowledge_command','marketing_creative_command','marketing_publishing_command','marketing_video_command','marketing_report_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
 };}
 const load=routeLoader({'@/lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'marketing_publishing_gateway_command');try{return {data:await serviceCommand(args.p_command),error:null};}catch(error){return {data:null,error};}}})},'@/lib/dashboardSession':{getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
 const api=load('app/api/marketing/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
 const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
+const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
 const env=await readFile('.env.local','utf8');const supabaseUrl=env.match(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)?.[1];
 assert.ok(supabaseUrl,'Public Supabase URL is required for the client SDK storage key');const storageKey=`sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 const browser=await playwright.chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});
-const report={checks:[],screenshots:[],errors:[],externalBlocked:0,commands:[],gatewayActions,legacyShellLoads:0,storageFixture:'In-memory Storage HTTP simulation with real disposable PostgreSQL object metadata/RLS; no deployed Storage service tested'};
+const report={scope:phase5Only?'phase5-focused':'all-phases',checks:[],screenshots:[],errors:[],externalBlocked:0,commands:[],gatewayActions,legacyShellLoads:0,storageFixture:'In-memory Storage HTTP simulation with actual browser File bytes and disposable PostgreSQL metadata/RLS. Chromium multipart File bytes forwarded locally for the fixture; hosted Storage untested.'};
 let lastPage;let stage='initializing';
 let planGate=null;
 const checkpoint=value=>{stage=value;console.log('QA:',value);};
 const watchdog=setInterval(()=>console.log('QA pending:',stage),15000);watchdog.unref();
 async function context(actor,viewport={width:1440,height:1000}){
  const ctx=await browser.newContext({viewport,reducedMotion:'reduce'});
+ // Chromium's intercepted multipart metadata omits the bytes of File parts.
+ // Forward only the test SDK upload as a raw byte request to the local fixture.
+ await ctx.addInitScript(({origin})=>{
+  const nativeFetch=window.fetch.bind(window);
+  const prefix='/storage/v1/object/marketing-footage/';
+  window.fetch=async (input,init)=>{
+   const url=new URL(input instanceof Request?input.url:String(input),location.origin);
+   if(url.origin!==origin||!url.pathname.startsWith(prefix)||init?.method!=='POST')return nativeFetch(input,init);
+   const body=init.body;
+   const file=body instanceof FormData?[...body.values()].find(value=>value instanceof Blob):body;
+   if(!(file instanceof Blob))throw Error('QA expected a Storage File payload');
+   const headers=new Headers(init.headers);headers.set('content-type',file.type);
+   return nativeFetch('/qa-storage-upload/'+url.pathname.slice(prefix.length),{...init,headers,body:new Uint8Array(await file.arrayBuffer())});
+  };
+ },{origin:new URL(supabaseUrl).origin});
  if(actor)await ctx.addInitScript(({key,token,actor})=>localStorage.setItem(key,JSON.stringify({access_token:token,refresh_token:'fixture-only',token_type:'bearer',expires_in:86400,expires_at:Math.floor(Date.now()/1000)+86400,user:{id:actor.id,email:actor.email,aud:'authenticated',role:'authenticated',app_metadata:{},user_metadata:{},created_at:actor.createdAt}})),{key:storageKey,token:tokenFor(actor),actor});
  await ctx.route('**/*',async route=>{
-  const req=route.request(),url=new URL(req.url());if(url.origin!==base){report.externalBlocked++;return route.abort();}
-  if(url.pathname==='/api/marketing'||url.pathname==='/api/marketing/knowledge'||url.pathname==='/api/marketing/publishing'||creativeApis[url.pathname]){
+  const req=route.request(),url=new URL(req.url());
+  if(url.origin===base&&url.pathname.startsWith('/qa-storage-upload/')&&req.method()==='POST'){
+   const uploader=tokens.get(req.headers().authorization?.replace(/^Bearer /,''));if(!uploader)return route.fulfill({status:401,json:{message:'Synthetic identity required'}});
+   const path=decodeURIComponent(url.pathname.slice('/qa-storage-upload/'.length));
+   try{
+    assert.equal(req.headers()['x-upsert'],'false');
+    const bytes=req.postDataBuffer(),mime=req.headers()['content-type'];assert.ok(bytes?.length);
+    await asActor(uploader,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',['marketing-footage',path,JSON.stringify({size:bytes.length,mimetype:mime})]);storedBytes.set(path,bytes);return route.fulfill({status:200,json:{Key:'marketing-footage/'+path,Id:randomUUID()}});
+   }catch(error){console.log('QA footage upload fixture denied:',error.message);return route.fulfill({status:403,json:{statusCode:'403',error:'Private fixture denied',message:'Fixture rejected upload'}});}
+  }
+  if(url.origin!==base){report.externalBlocked++;return route.abort();}
+  if(url.pathname.startsWith('/qa-footage/')){
+   const signed=signedFootage.get(url.pathname.slice('/qa-footage/'.length));if(!signed||signed.expires<=Date.now())return route.fulfill({status:403,body:'Expired private fixture'});
+   const rows=await asActor(signed.actor,'select metadata from storage.objects where bucket_id=$1 and name=$2',['marketing-footage',signed.path]);const bytes=rows.rows.length?storedBytes.get(signed.path):null;if(!bytes)return route.fulfill({status:403,body:'Revoked private fixture'});
+   const range=req.headers().range?.match(/^bytes=(\d+)-(\d*)$/),start=range?Number(range[1]):0,end=range&&range[2]?Math.min(Number(range[2]),bytes.length-1):bytes.length-1;
+   return route.fulfill({status:range?206:200,headers:{'Content-Type':rows.rows[0].metadata.mimetype,'Accept-Ranges':'bytes','Cache-Control':'no-store',...(range?{'Content-Range':`bytes ${start}-${end}/${bytes.length}`}:{})},body:bytes.subarray(start,end+1)});
+  }
+  if(url.pathname==='/api/marketing'||url.pathname==='/api/marketing/knowledge'||url.pathname==='/api/marketing/publishing'||creativeApis[url.pathname]||phase5Apis[url.pathname]){
    if(req.method()==='POST'&&!url.pathname.endsWith('/upload'))report.commands.push(JSON.parse(req.postData()||'{}').action);
    if(req.method()==='POST'&&planGate&&JSON.parse(req.postData()||'{}').action==='update_plan'){const gate=planGate;planGate=null;gate.started.resolve();await gate.release.promise;}
-   const handler=creativeApis[url.pathname]||(url.pathname==='/api/marketing/publishing'?publishingApi:url.pathname==='/api/marketing'?api:knowledgeApi);
+   const handler=creativeApis[url.pathname]||phase5Apis[url.pathname]||(url.pathname==='/api/marketing/publishing'?publishingApi:url.pathname==='/api/marketing'?api:knowledgeApi);
    const response=await handler[req.method()](new Request(req.url(),{method:req.method(),headers:req.headers(),...(req.method()==='POST'?{body:req.postDataBuffer()}: {})}));
    return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
   }
@@ -81,7 +119,7 @@ async function context(actor,viewport={width:1440,height:1000}){
   }
   return route.continue();
  });
- const page=await ctx.newPage();lastPage=page;page.setDefaultTimeout(12000);page.on('pageerror',error=>report.errors.push(error.message));return {ctx,page};
+ const page=await ctx.newPage();lastPage=page;page.setDefaultTimeout(12000);page.setDefaultNavigationTimeout(45000);page.on('pageerror',error=>report.errors.push(error.message));return {ctx,page};
 }
 async function shot(page,name){const path=resolve(out,name+'.png');await page.evaluate(()=>{window.scrollTo(0,0);if(document.getElementById('mk-qa-label'))return;const label=document.createElement('div');label.id='mk-qa-label';label.textContent='DỮ LIỆU MINH HỌA · KIỂM THỬ LOCAL · KHÔNG KẾT NỐI PRODUCTION';label.style.cssText='position:fixed;bottom:8px;right:8px;z-index:2147483647;background:#242328;color:white;border-radius:5px;padding:7px 10px;font:10px Arial;max-width:90vw;pointer-events:none';document.body.append(label);});await page.screenshot({path,fullPage:true,animations:'disabled'});report.screenshots.push(path);}
 async function cmd(page,actor,command,endpoint='/api/marketing'){const result=await page.evaluate(async ({token,command,endpoint})=>{const r=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(command)});return {status:r.status,body:await r.json()};},{token:tokenFor(actor),command,endpoint});assert.equal(result.status,200,JSON.stringify(result.body));return result.body.result;}
@@ -94,9 +132,15 @@ try{
  await p.goto(base+'/marketing');await p.getByLabel('Tên team mới').fill('Partnership · dữ liệu kiểm thử');await p.getByRole('button',{name:'Tạo team',exact:true}).click();await p.getByText('Đã tạo team Marketing.').waitFor();
  const team=(await db.query('select id from marketing_teams')).rows[0];for(const actor of actors.slice(1))await cmd(p,actors[0],{action:'set_member',team_id:team.id,user_id:actor.id,enabled:true});
  report.checks.push('Admin creates real persisted team and memberships');
+ let campaign;
+ if(phase5Only){
+  campaign=await cmd(p,actors[0],{action:'create_campaign',team_id:team.id,name:'Sharing · chiến dịch kiểm thử',kind:'always_on',objective:'Kiểm thử timeline và báo cáo',audience:'',message:'',start_date:null,end_date:null});
+  campaign=await cmd(p,actors[0],{action:'submit_activation',id:campaign.id,expected_version:campaign.version});
+  campaign=await cmd(p,actors[0],{action:'activate_campaign',id:campaign.id,expected_version:campaign.version});
+ }else{
  checkpoint('create campaign');
  await p.getByRole('link',{name:'Campaigns',exact:true}).click();await p.getByRole('button',{name:'+ Tạo Campaign',exact:true}).click();await p.getByLabel('Tên Campaign',{exact:true}).fill('Sharing · chiến dịch kiểm thử');await p.getByLabel('Mục tiêu',{exact:true}).fill('Kiểm chứng luồng nội dung có lưu PostgreSQL');await p.getByRole('button',{name:'Lưu Campaign',exact:true}).click();await p.getByRole('heading',{name:'Sharing · chiến dịch kiểm thử',exact:true}).waitFor();
- const campaign=(await db.query('select * from marketing_campaigns')).rows[0];
+ campaign=(await db.query('select * from marketing_campaigns')).rows[0];
  await p.getByRole('button',{name:'Content Plan',exact:true}).click();await p.getByLabel('Kế hoạch chung').fill('Dữ liệu kiểm thử: kế hoạch có version.');await p.getByText(/^Đã lưu v\d+$/).waitFor();
  assert.equal((await db.query('select plan from marketing_campaigns')).rows[0].plan,'Dữ liệu kiểm thử: kế hoạch có version.');
  checkpoint('delayed autosave remount conflict');
@@ -128,6 +172,12 @@ try{
  await testCreativeWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/creative'),mainCommand:(page,actor,command)=>cmd(page,actor,command),report});
  checkpoint('Phase4 Publishing workflow');
  await testPublishingWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/publishing'),mainCommand:(page,actor,command)=>cmd(page,actor,command),serviceCommand,context,report});lastPage=p;
+ }
+ checkpoint('Phase5 Video Timeline and Reports');
+ const footagePath=resolve(out,'qa-footage.mp4');
+ execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=0x184857:s=320x180:r=24:d=3','-f','lavfi','-i','sine=frequency=440:duration=3','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart','-y',footagePath]);
+ await testVideoReportsWorkflow({page:p,db,base,actors,team,campaign,shot,commandVideo:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/video'),commandReports:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/reports'),mainCommand:cmd,serviceCommand,reportIngest,context,report,footagePath});lastPage=p;
+ if(!phase5Only){
  checkpoint('eight routes');
  const titles={overview:'Marketing Overview',campaigns:'Campaigns',agent:'AI Agent & Ideas',studio:'Creative Studio',calendar:'Content Calendar',assets:'Asset & Template Library',intelligence:'Intelligence & Reports',approvals:'Approval Inbox'};
  for(const [path,name] of [['','overview'],['/campaigns','campaigns'],['/agent','agent'],['/studio','studio'],['/calendar','calendar'],['/assets','assets'],['/intelligence','intelligence'],['/approvals','approvals']]){
@@ -149,6 +199,7 @@ try{
  await legacyCtx.route('**/*',async route=>{const url=new URL(route.request().url());if(url.origin!=='http://marketing-legacy.test')return route.fulfill({body:''});if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:legacySource.replace(/\nclmBoot\(\);\s*\n/,'\n')});if(url.pathname.startsWith('/creative-os/')||url.pathname.startsWith('/marketing/')||url.pathname==='/colorme-logo.png'){const path=resolve(root,'public','.'+url.pathname);assert.ok(path.startsWith(resolve(root,'public')+'/'));return route.fulfill({contentType:{'.css':'text/css','.js':'text/javascript','.png':'image/png','.svg':'image/svg+xml'}[extname(path)],body:await readFile(path)});}return route.fulfill({json:{}});});
  await legacy.goto('http://marketing-legacy.test');await legacy.evaluate(creativeOsFixture);await shot(legacy,'legacy-sidebar-before');
  legacySource=await readFile('dashboard/clm-dashboard-private-34.html','utf8');await legacy.reload();await legacy.evaluate(creativeOsFixture);const toggle=legacy.getByRole('button',{name:'Marketing',exact:true});await toggle.waitFor();await toggle.press('Enter');assert.equal(await legacy.locator('.clm-marketing-link:visible').count(),8);assert.equal(await toggle.getAttribute('aria-expanded'),'true');await shot(legacy,'legacy-sidebar-after');await legacy.evaluate('ui.collapsed=true;render()');await legacy.getByRole('button',{name:'Marketing',exact:true}).click();assert.equal(await legacy.locator('.sidebar.collapsed').count(),0);assert.equal(await legacy.locator('.clm-marketing-link:visible').count(),8);await legacyCtx.close();report.checks.push('Actual legacy sidebar has one Marketing parent and eight keyboard/collapse-safe links');
+ }
  assert.deepEqual(report.errors,[]);assert.equal((await db.query("select count(*)::int n from marketing_content_items where publishing_status in ('approved','scheduled','published')")).rows[0].n,0);
  await admin.ctx.close();console.log(JSON.stringify(report,null,2));
 }catch(error){report.failureUrl=lastPage?.url();report.errors.push(error.stack||String(error));console.error('Failure URL:',report.failureUrl,error);if(lastPage&&!lastPage.isClosed())await shot(lastPage,'failure').catch(()=>{});throw error;}finally{clearInterval(watchdog);await writeFile(resolve(out,'qa-report.json'),JSON.stringify(report,null,2));await browser.close();await db.close();}
