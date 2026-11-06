@@ -14,6 +14,7 @@ import {creativeOsFixture} from '../tests/fixtures/creative-os.mjs';
 import {testKnowledgeWorkflow} from './marketing-knowledge-ui-checks.mjs';
 import {testCreativeWorkflow} from './marketing-creative-ui-checks.mjs';
 import {testPublishingWorkflow} from './marketing-publishing-ui-checks.mjs';
+import {testCalendarPublication} from './marketing-calendar-ui-checks.mjs';
 import {testKpiRevisionWorkflow} from './marketing-kpi-ui-checks.mjs';
 import {testVideoReportsWorkflow} from './marketing-video-reports-ui-checks.mjs';
 import {randomUUID} from 'node:crypto';
@@ -61,7 +62,7 @@ const api=load('app/api/marketing/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
 const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
-const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export','readiness'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
+const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export','readiness','calendar'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
 const env=await readFile('.env.local','utf8');const supabaseUrl=env.match(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)?.[1];
 assert.ok(supabaseUrl,'Public Supabase URL is required for the client SDK storage key');const storageKey=`sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 const browser=await playwright.chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});
@@ -128,6 +129,7 @@ async function context(actor,viewport={width:1440,height:1000}){
 async function shot(page,name){const path=resolve(out,name+'.png');await page.evaluate(()=>{window.scrollTo(0,0);if(document.getElementById('mk-qa-label'))return;const label=document.createElement('div');label.id='mk-qa-label';label.textContent='DỮ LIỆU MINH HỌA · KIỂM THỬ LOCAL · KHÔNG KẾT NỐI PRODUCTION';label.style.cssText='position:fixed;bottom:8px;right:8px;z-index:2147483647;background:#242328;color:white;border-radius:5px;padding:7px 10px;font:10px Arial;max-width:90vw;pointer-events:none';document.body.append(label);});await page.screenshot({path,fullPage:true,animations:'disabled'});report.screenshots.push(path);}
 async function cmd(page,actor,command,endpoint='/api/marketing'){const result=await page.evaluate(async ({token,command,endpoint})=>{const r=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(command)});return {status:r.status,body:await r.json()};},{token:tokenFor(actor),command,endpoint});assert.equal(result.status,200,JSON.stringify(result.body));return result.body.result;}
 async function deadline(promise){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Deferred QA request did not arrive')),12000);})]);}finally{clearTimeout(timer);}}
+let calendarPublishedId=null;
 try{
  checkpoint('signed-out deep link');
  const signedOut=await context(null);await signedOut.page.goto(base+'/marketing/studio');await signedOut.page.getByRole('link',{name:'Đăng nhập Dashboard'}).waitFor();report.checks.push('Deep link requires existing ColorME sign-in');await signedOut.ctx.close();
@@ -186,12 +188,17 @@ try{
  if(!phase5Only){
  checkpoint('KPI proposal and confirmation');
  await testKpiRevisionWorkflow({page:p,db,base,actors,team,cmd,context,shot,report});
+ checkpoint('Calendar verified receipt projection');lastPage=p;
+ calendarPublishedId=await testCalendarPublication({page:p,db,base,actors,team,campaign,shot,mainCommand:cmd,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/publishing'),serviceCommand,report});
  checkpoint('Phase6 Admin readiness');
  const realHttp=await playwright.request.newContext({baseURL:base});
  try{
   const denied=await realHttp.get('/api/marketing/reports/export');
   assert.equal(denied.status(),401);
   assert.equal((await denied.json()).code,'unauthorized');
+  const calendarDenied=await realHttp.get('/api/marketing/calendar');
+  assert.equal(calendarDenied.status(),401);
+  assert.match(calendarDenied.headers()['cache-control'],/no-store/);
  }finally{await realHttp.dispose();}
  await p.goto(base+'/marketing');
  await p.getByRole('button',{name:'Kiểm tra trạng thái',exact:true}).click();
@@ -221,6 +228,6 @@ try{
  await legacy.goto('http://marketing-legacy.test');await legacy.evaluate(creativeOsFixture);await shot(legacy,'legacy-sidebar-before');
  legacySource=await readFile('dashboard/clm-dashboard-private-34.html','utf8');await legacy.reload();await legacy.evaluate(creativeOsFixture);const toggle=legacy.getByRole('button',{name:'Marketing',exact:true});await toggle.waitFor();await toggle.press('Enter');assert.equal(await legacy.locator('.clm-marketing-link:visible').count(),8);assert.equal(await toggle.getAttribute('aria-expanded'),'true');await shot(legacy,'legacy-sidebar-after');await legacy.evaluate('ui.collapsed=true;render()');await legacy.getByRole('button',{name:'Marketing',exact:true}).click();assert.equal(await legacy.locator('.sidebar.collapsed').count(),0);assert.equal(await legacy.locator('.clm-marketing-link:visible').count(),8);await legacyCtx.close();report.checks.push('Actual legacy sidebar has one Marketing parent and eight keyboard/collapse-safe links');
  }
- assert.deepEqual(report.errors,[]);assert.equal((await db.query("select count(*)::int n from marketing_content_items where publishing_status in ('approved','scheduled','published')")).rows[0].n,0);
+ assert.deepEqual(report.errors,[]);assert.deepEqual((await db.query("select id from marketing_content_items where publishing_status in ('approved','scheduled','published')")).rows.map(row=>row.id),calendarPublishedId?[calendarPublishedId]:[]);
  await admin.ctx.close();console.log(JSON.stringify(report,null,2));
 }catch(error){report.failureUrl=lastPage?.url();report.errors.push(error.stack||String(error));console.error('Failure URL:',report.failureUrl,error);if(lastPage&&!lastPage.isClosed())await shot(lastPage,'failure').catch(()=>{});throw error;}finally{report.stageDurationsMs[stage]=Math.round(performance.now()-stageStarted);clearInterval(watchdog);await writeFile(resolve(out,'qa-report.json'),JSON.stringify(report,null,2));await browser.close();await db.close();}

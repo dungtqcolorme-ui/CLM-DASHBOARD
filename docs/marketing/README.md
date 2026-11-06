@@ -53,6 +53,10 @@ Creative browser tests simulate Storage HTTP bytes in memory while executing rea
 
 Open an active Campaign and select **Insights**. An authorized member can save proposed targets and a reason. The team Leader or Admin reviews the current and proposed targets and confirms the saved proposal. The confirmed KPI appears alongside the activation baseline and confirmation history. The KPI sequence is independent of the Campaign version used by publishing approvals.
 
+## Content Calendar evidence
+
+Calendar shows the proposed hour until an active publication has a linked approval snapshot. Approved items are placed by their approved slot in Vietnam time. Verified receipts drive the Meta status. The receipt observation time and the actual publication time are separate fields, and the latter stays unavailable until the provider supplies it. Pending reconciliation and unresolved incidents appear as alerts.
+
 ## Reports and rollback
 
 `PHASE5_REPORT.md` and `PHASE6_REPORT.md` capture verified behavior and the limits of local acceptance. The operator steps for staging, rollout, incident response and rollback are in `LAUNCH_RUNBOOK.md`. Use `FEATURE_READINESS.md` to track provider and workflow gaps.

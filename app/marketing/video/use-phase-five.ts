@@ -16,7 +16,7 @@ export function useVersionedDraft<T>(key: string, accessVersion: number) {
   }] as const;
 }
 
-export function usePhaseFive<Workspace>(area: "video" | "reports", userId: string, accessVersion: number) {
+export function usePhaseFive<Workspace>(area: "video" | "reports" | "calendar", userId: string, accessVersion: number) {
   const { invalidateAccess } = useMarketing();
   const path = "/api/marketing/" + area;
   const [data, setData] = useState<Workspace | null>(null);

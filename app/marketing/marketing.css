@@ -15,3 +15,6 @@
 .mk-kpi-confirm input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 0; flex: 0 0 18px; }
 .mk-kpi-input { display: grid; grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 10px; }
 @media (max-width: 720px) { .mk-kpi-input { grid-template-columns: 1fr; } }
+
+.mk-calendar-state { display: inline-block; color: var(--mk-ink, #25252b); font-weight: 600; }
+.mk-calendar-state.mk-calendar-attention { color: #8b4b10; }

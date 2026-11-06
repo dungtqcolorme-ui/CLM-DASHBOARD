@@ -25,6 +25,7 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 | Hiệu năng | Đo p50/p95 cho Overview, list theo team, mở Studio, tải preview và PDF/XLSX trên dữ liệu staging có kích thước dự kiến. Theo dõi 429/503, kích thước response, truy vấn chậm và bộ nhớ export. Kiểm tra truy vấn bằng EXPLAIN trên staging. |
 | Dashboard cũ | Login, Task, Email/Calendar, Báo cáo, catalog, điều hướng desktop/mobile và dữ liệu chưa lưu khi quay lại iframe. |
 | KPI Campaign | Representative lưu đề xuất có lý do, Leader cùng team hoặc Admin xác nhận đúng phiên bản. Kiểm tra KPI gốc và bản duyệt đăng vẫn sử dụng mốc phiên bản tương ứng. |
+| Content Calendar | Đối chiếu giờ đề xuất, khung giờ trong bản duyệt và trạng thái Meta. Kiểm tra lịch theo giờ Việt Nam, biên nhận thiếu giờ đăng và cảnh báo đang đối soát. |
 | Báo cáo | Kỳ tuần/tháng theo giờ Việt Nam, trường thiếu hiển thị đúng, approval ràng buộc phiên bản và hai định dạng mở được bằng ứng dụng đích. |
 
 Ngân sách database tính theo phút và theo tài khoản. Mutation thông thường 240, tạo báo cáo 12, yêu cầu render 6, xuất báo cáo 10. Command bị rollback cũng rollback bộ đếm. Emergency Hold vẫn qua kiểm tra quyền và lý do khi chạm ngân sách. Các giới hạn này không bao phủ truy vấn đọc trực tiếp hoặc request vô danh. Chỉ mở rộng nhóm pilot sau khi theo dõi mức dùng và cấu hình giới hạn hạ tầng tương ứng. Giữ nguyên RLS và quyền riêng tư cho dữ liệu nguồn trong mọi phép đo.
