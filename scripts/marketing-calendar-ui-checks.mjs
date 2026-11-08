@@ -7,6 +7,9 @@ export async function testCalendarPublication({ page, db, base, actors, team, ca
   const slot = new Date(Date.now() + 86400000).toISOString();
   const slotVietnam = new Date(Date.parse(slot) + 7 * 3600000).toISOString();
   const title = 'Calendar QA · đối chiếu biên nhận';
+  const thumbnailRequests=[];
+  const trackThumbnail=request=>{if(new URL(request.url()).searchParams.get('variant')==='thumbnail')thumbnailRequests.push(request.url());};
+  page.on('request',trackThumbnail);
   await page.goto(`${base}/marketing/assets?campaign=${campaign.id}`);
   const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1080;c.height=1080;const x=c.getContext('2d');x.fillStyle='#136943';x.fillRect(0,0,1080,1080);return c.toDataURL('image/png').split(',')[1];});
   await page.getByLabel('File ảnh',{exact:true}).setInputFiles({name:'calendar-qa.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
@@ -40,6 +43,7 @@ export async function testCalendarPublication({ page, db, base, actors, team, ca
   const row = page.getByRole('row').filter({ has:page.getByRole('button',{name:title,exact:true}) });
   await row.getByText('Đã duyệt · Hàng đợi nội bộ',{exact:true}).waitFor();
   assert.equal(await row.getByText('Meta xác nhận lên lịch',{exact:true}).count(),0);
+  assert.equal(thumbnailRequests.length,0);
 
   // Advance this disposable queue entry to its due state, then restore the immutable approved slot.
   await db.query("update public.marketing_publishing_jobs set scheduled_for=now()-interval '1 minute', next_attempt_at=now()-interval '1 minute' where id=$1",[job.id]);
@@ -85,6 +89,17 @@ export async function testCalendarPublication({ page, db, base, actors, team, ca
   await image.waitFor();
   await drawer.getByRole('button',{name:'Đóng chi tiết',exact:true}).click();
   await drawer.waitFor({ state:'hidden' });
+  const toggle=page.getByRole('checkbox',{name:'Ảnh thu nhỏ từ bản duyệt',exact:true});
+  await toggle.check();await chip.scrollIntoViewIfNeeded();
+  const thumbnail=chip.locator('.mk-calendar-thumbnail img');await thumbnail.waitFor();
+  await thumbnail.evaluate(image=>image.decode());
+  assert.deepEqual(await thumbnail.evaluate(image=>[image.naturalWidth,image.naturalHeight]),[90,90]);
+  const countBeforeExpiry=thumbnailRequests.length;
+  await shot(page,'calendar-thumbnails');
+  await page.clock.fastForward(31000);await thumbnail.waitFor({state:'detached'});
+  await chip.getByText('Ảnh hết hạn',{exact:true}).waitFor();
+  assert.equal(thumbnailRequests.length,countBeforeExpiry);
+  await page.clock.setSystemTime(new Date());
 
   await serviceCommand({ action:'reconcile_job', id:job.id, expected_version:scheduled.version,
     outcome:'published', remote_id:remoteId,
@@ -101,7 +116,14 @@ export async function testCalendarPublication({ page, db, base, actors, team, ca
   assert.equal(await drawer.getByRole('img').count(),0);
   assert.match(await drawer.getByRole('link',{name:'Mở trong Studio'}).getAttribute('href'),new RegExp(content.id));
   await drawer.getByRole('button',{name:'Đóng chi tiết',exact:true}).click();
+  await drawer.waitFor({state:'hidden'});
+  await toggle.uncheck();await toggle.check();await chip.scrollIntoViewIfNeeded();
+  await chip.getByText('Ảnh không khả dụng',{exact:true}).waitFor();
+  assert.equal(await chip.locator('.mk-calendar-thumbnail img').count(),0);
+  await page.getByRole('heading',{name:'Content Calendar',exact:true}).waitFor();
+  await toggle.uncheck();page.off('request',trackThumbnail);
   report.checks.push('Calendar separates proposed and approved Vietnam slots, recognizes only verified remote receipts, and leaves actual publish time unknown when absent');
   report.checks.push('Calendar loads sealed private PNG on demand, expires its object URL after 30s, reloads with current rights and blocks revoked images without losing the workspace');
+  report.checks.push('Calendar thumbnails are opt-in, lazy private WebP pixels at 90x90, expire without auto-refetch and reject revoked media while keeping the Calendar usable');
   return content.id;
 }

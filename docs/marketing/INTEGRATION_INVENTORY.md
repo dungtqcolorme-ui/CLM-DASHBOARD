@@ -59,6 +59,7 @@ Phase 3 additionally consulted current [private bucket documentation](https://su
 |---|---|---|
 | PDFKit | 0.20.2, MIT. [Upstream](https://github.com/foliojs/pdfkit) | Server-side PDF with embedded Vietnamese font and approved report snapshot. |
 | ExcelJS | 4.4.0, MIT. [Upstream](https://github.com/exceljs/exceljs) | Server-side XLSX. User content is written as literal strings. |
+| Sharp | 0.35.5, Apache-2.0 from installed package metadata. [API](https://sharp.pixelplumbing.com/api-constructor/) | Already installed transitively through Next; now a direct pinned dependency for private Calendar thumbnails. Fixed WebP resize, no enlargement/metadata retention, 3-second native timeout, one transform/process. Existing native binaries reused offline; production runtime validation remains in staging acceptance. |
 | Noto Sans | Bundled TTF and SIL OFL 1.1. Hash and upstream URLs in `public/marketing/fonts/SOURCE.txt`. | PDF fallback for Vietnamese. Official dashboard logo stays at its source aspect ratio. |
 | FFmpeg CLI | Existing 9.0.1 binary reports GPL-3.0-or-later build. | Generates a synthetic local test clip only. The app uses native browser media playback. Worker selection and production licensing remain pending. |
 | Remotion, HyperFrames, STT | No app dependency or provider enabled. | Manual timeline and native preview. Worker status remains `not_configured`. |

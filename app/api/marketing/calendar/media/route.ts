@@ -8,6 +8,7 @@ import { MarketingError } from "@/lib/marketing/domain";
 import { inputId, invalidInput } from "@/lib/marketing/input";
 import type { MediaAttestation } from "@/lib/marketing/publishing-types";
 import { databaseError, marketingErrorResponse } from "@/lib/marketing/server";
+import { createCalendarThumbnail } from "@/lib/marketing/calendar-thumbnail";
 
 function unavailable(): never { throw new MarketingError("Ảnh trong bản duyệt không còn khả dụng. Kiểm tra quyền hoặc bản duyệt hiện tại.", 403, "asset_unavailable"); }
 
@@ -35,12 +36,18 @@ export async function GET(request: Request) {
   try {
     const { client } = await getDashboardRequestIdentity(request);
     const query = [...new URL(request.url).searchParams];
-    if (query.length !== 2 || query.filter(([key]) => key === "job_id").length !== 1 || query.filter(([key]) => key === "asset_id").length !== 1) invalidInput();
+    const thumbnail = query.some(([key, value]) => key === "variant" && value === "thumbnail");
+    if (query.length !== (thumbnail ? 3 : 2) || query.some(([key]) => !["job_id", "asset_id", ...(thumbnail ? ["variant"] : [])].includes(key))
+      || query.filter(([key]) => key === "job_id").length !== 1 || query.filter(([key]) => key === "asset_id").length !== 1) invalidInput();
     const params = new URLSearchParams(query);
     const jobId = inputId(params.get("job_id")), assetId = inputId(params.get("asset_id"));
     const binding = await readBinding(client, jobId, assetId);
     const asset = await readCreativeAsset(client, assetId);
     checkAsset(asset, binding.job, binding.media);
+    if (thumbnail) {
+      const { error } = await client.rpc("marketing_reserve_calendar_thumbnail");
+      if (error) databaseError(error);
+    }
     const { data, error } = await client.storage.from(CREATIVE_BUCKET).download(asset.storage_path);
     if (error || !data) throw new MarketingError("Chưa tải được ảnh riêng tư. Vui lòng thử lại.", 503, "storage_unavailable");
     if (data.size > 8388608) unavailable();
@@ -48,17 +55,18 @@ export async function GET(request: Request) {
     const actual = inspectCreativeImage(bytes, asset.mime_type);
     matchesCreativeBytes(asset, actual);
     if (actual.reported_sha256 !== binding.media.sha256 || actual.byte_size !== binding.media.byte_size) unavailable();
-    // Storage awaits can outlive a scope/rights change. Re-read with the same user JWT before releasing bytes.
+    const output = thumbnail ? await createCalendarThumbnail(bytes) : bytes;
+    // Storage/native-transform awaits can outlive a scope change. Re-read with the same user JWT before releasing bytes.
     const currentAsset = await readCreativeAsset(client, assetId);
     const current = await readBinding(client, jobId, assetId);
     checkAsset(currentAsset, current.job, current.media);
     if (JSON.stringify(current.media) !== JSON.stringify(binding.media)) unavailable();
     const until = Math.min(Date.now() + 30000, currentAsset.valid_until ? Date.parse(currentAsset.valid_until) : Infinity);
     if (until <= Date.now()) unavailable();
-    return new Response(bytes, { headers: {
-      "Content-Type": asset.mime_type, "Content-Length": String(bytes.length),
+    return new Response(output, { headers: {
+      "Content-Type": thumbnail ? "image/webp" : asset.mime_type, "Content-Length": String(output.length),
       "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff",
-      "Content-Disposition": `inline; filename=calendar-preview.${asset.mime_type === "image/png" ? "png" : "jpg"}`,
+      "Content-Disposition": `inline; filename=calendar-preview.${thumbnail ? "webp" : asset.mime_type === "image/png" ? "png" : "jpg"}`,
       "X-Marketing-Preview-Until": new Date(until).toISOString(),
     } });
   } catch (error) { return marketingErrorResponse(error); }

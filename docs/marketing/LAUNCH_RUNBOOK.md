@@ -12,6 +12,7 @@ Dùng một dự án Supabase staging riêng và một deployment preview giới
 6. `20261106000100_marketing_hardening.sql`
 7. `20261106000200_marketing_kpi_revisions.sql`
 8. `20261108000100_marketing_task_links.sql`
+9. `20261108000200_marketing_calendar_thumbnails.sql`
 
 Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration đã áp dụng và cách truy cập bản sao lưu. Kiểm tra `marketing-originals` và `marketing-footage` là bucket riêng tư, quyền SELECT/INSERT khớp với chính sách Marketing và các chính sách Storage có sẵn. Dùng tài khoản thật của staging để thử upload, tải private và phát/seek media qua URL ký 60 giây. Kiểm tra quyền khi nguồn bị thu hồi, link đã phát hành hết hạn, file sai MIME và người ngoài team.
 
@@ -31,7 +32,9 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 | Đổi lịch đề xuất | Kéo bản nháp sang ngày khác: chưa lưu thì DB không đổi; lưu giữ giờ Việt Nam, caption, Creator và hạn sản xuất/duyệt. Sửa đồng thời phải báo conflict, giữ giờ vừa nhập, chỉ thử lại sau khi lấy nội dung hiện tại. Kiểm tra thao tác bàn phím/chạm, Viewer, Campaign Paused/Hold và bài đã duyệt/lên lịch không được kéo sửa. |
 | Báo cáo | Kỳ tuần/tháng theo giờ Việt Nam, trường thiếu hiển thị đúng, approval ràng buộc phiên bản và hai định dạng mở được bằng ứng dụng đích. |
 
-Ngân sách database tính theo phút và theo tài khoản. Mutation thông thường 240, tạo báo cáo 12, yêu cầu render 6, xuất báo cáo 10. Command bị rollback cũng rollback bộ đếm. Emergency Hold vẫn qua kiểm tra quyền và lý do khi chạm ngân sách. Các giới hạn này không bao phủ truy vấn đọc trực tiếp hoặc request vô danh. Chỉ mở rộng nhóm pilot sau khi theo dõi mức dùng và cấu hình giới hạn hạ tầng tương ứng. Giữ nguyên RLS và quyền riêng tư cho dữ liệu nguồn trong mọi phép đo.
+Ngân sách database tính theo phút và theo tài khoản. Mutation thông thường 240, tạo báo cáo 12, yêu cầu render 6, xuất báo cáo 10, tạo thumbnail Calendar 30. Command bị rollback cũng rollback bộ đếm; reservation thumbnail đã nhận vẫn tính nếu tải/xử lý ảnh sau đó thất bại. Emergency Hold vẫn qua kiểm tra quyền và lý do khi chạm ngân sách. Các giới hạn này không bao phủ truy vấn đọc trực tiếp hoặc request vô danh. Chỉ mở rộng nhóm pilot sau khi theo dõi mức dùng và cấu hình giới hạn hạ tầng tương ứng. Giữ nguyên RLS và quyền riêng tư cho dữ liệu nguồn trong mọi phép đo.
+
+Thumbnail Calendar tắt mặc định; bật để kiểm tra ảnh WebP tối đa 160×90, tải tuần tự khi ô lịch đi vào viewport, gỡ sau tối đa 30 giây và không tự tải lại. Tắt tùy chọn/đổi scope phải gỡ ảnh và hủy request chờ. Đối chiếu ảnh đầu từ đúng bản duyệt, metadata đã bỏ, thu hồi quyền trong lúc resize phải chặn response. Kiểm tra 429 và bộ nhớ/timeout của Sharp trên runtime staging; mỗi tiến trình chỉ chạy một thumbnail native tại một thời điểm. Không ghi ảnh thu nhỏ thành object Storage hay URL công khai.
 
 ## Tích hợp cần xử lý trước khi bật live
 

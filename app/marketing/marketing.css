@@ -25,3 +25,5 @@
 .mk-calendar-preview img{display:block;width:100%;max-height:360px;object-fit:contain;background:var(--mk-bg)}
 .mk-calendar-item[draggable=true]{cursor:grab}.mk-calendar-item[draggable=true]:active{cursor:grabbing}.mk-calendar-drop-target{outline:1px dashed #c8c1bc;outline-offset:-3px}.mk-calendar-drop-target:hover{background:var(--mk-red-tint)}
 .mk-calendar-reschedule{padding:16px;margin:16px 0;border:1px solid var(--mk-border);border-radius:12px}.mk-calendar-reschedule h3{margin-top:0}
+.mk-calendar-thumbnail{display:flex;align-items:center;justify-content:center;min-width:0;width:100%;height:90px;background:var(--mk-bg);border-radius:6px;overflow:hidden}.mk-calendar-thumbnail img{display:block;width:100%;height:90px;object-fit:contain}.mk-calendar-thumbnail small{padding:8px;overflow-wrap:anywhere;color:var(--mk-muted)}
+.mk-calendar-thumbnail-toggle{display:flex;align-items:center;gap:8px;min-height:42px;font-size:12px;cursor:pointer}.mk-root .mk-calendar-thumbnail-toggle input{width:16px;min-height:16px;flex:0 0 16px;margin:0;padding:0}

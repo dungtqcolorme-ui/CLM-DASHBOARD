@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { calendarDay, calendarEntries, type CalendarEntry, type CalendarEvidence, type CalendarState } from "@/lib/marketing/calendar-domain";
 import { Badge, Empty, Field, PageHeader, Panel, dateTime, lines, localDateTime } from "../components";
 import { useMarketing } from "../workspace";
@@ -9,6 +9,8 @@ import { useOperation, usePhaseFive } from "../video/use-phase-five";
 import { CalendarMediaPreview, type CalendarMediaAccess } from "./media-preview";
 import { calendarDropTime, canMoveCalendarContent } from "@/lib/marketing/calendar-schedule";
 import { CalendarScheduleForm } from "./schedule-form";
+import { createCalendarThumbnailQueue } from "@/lib/marketing/calendar-thumbnail-queue";
+import { CalendarThumbnail } from "./thumbnail";
 
 const dayMs = 86_400_000;
 const modes = [["month", "Tháng"], ["week", "Tuần"], ["list", "Danh sách"]] as const;
@@ -41,6 +43,8 @@ function Calendar() {
   const [channel, setChannel] = useState("");
   const [day, setDay] = useState(() => calendarDay(new Date().toISOString()));
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [showThumbnails, setShowThumbnails] = useState(false);
+  const thumbnailQueue = useMemo(() => createCalendarThumbnailQueue(), []);
   const [proposal, setProposal] = useState<{ contentId: string; time: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragId = useRef<string | null>(null);
@@ -82,6 +86,13 @@ function Calendar() {
   function open(id: string) { setProposal(null); setDetailId(id); }
   function close() { setDetailId(null); setProposal(null); }
   function endDrag() { dragId.current = null; setDragging(false); }
+  function thumbnail(row: CalendarEntry) {
+    const publication = row.publication;
+    const asset = publication?.approval?.finalAssets[0];
+    return showThumbnails && publication && asset && ["approved", "scheduled", "published"].includes(row.item.publishing_status)
+      ? <CalendarThumbnail key={`${publication.id}:${asset.id}:${asset.version}`} jobId={publication.id} assetId={asset.id} access={remote} queue={thumbnailQueue} />
+      : null;
+  }
 
   return <>
     <PageHeader title="Content Calendar" description="Lịch theo giờ Việt Nam, từ giờ đề xuất đến bản duyệt và biên nhận Meta đã lưu." />
@@ -91,6 +102,7 @@ function Calendar() {
     {!remote.data && !remote.error && <p className="mk-muted" role="status">Đang tải dữ liệu xuất bản…</p>}
     <Panel title="Lịch nội dung" action={<div className="mk-actions">
       <div className="mk-segment" aria-label="Chế độ lịch">{modes.map(([key, label]) => <button key={key} aria-pressed={mode === key} onClick={() => setMode(key)}>{label}</button>)}</div>
+      <label className="mk-calendar-thumbnail-toggle"><input type="checkbox" checked={showThumbnails} onChange={(event) => setShowThumbnails(event.target.checked)} />Ảnh thu nhỏ từ bản duyệt</label>
       <button disabled={reload.pending} onClick={() => void reload.run(async () => { await refresh(); remote.retry(); })}>Làm mới trạng thái</button>
     </div>}>
       <div className="mk-filters">
@@ -108,7 +120,8 @@ function Calendar() {
         }} /></Field>}
       </div>
       {canWrite && <p id="mk-calendar-reschedule-help" className="mk-muted">Kéo bài nháp/cần chỉnh sửa sang ngày khác để đề xuất giờ mới, rồi bấm lưu trong chi tiết. Bạn cũng có thể mở bài bằng bàn phím hoặc chạm để đổi giờ.</p>}
-      {mode === "list" ? <CalendarList rows={sorted} campaignName={campaignName} ownerLabel={ownerLabel} open={open} /> : <>
+      {showThumbnails && <p className="mk-muted">Chỉ tải ảnh ở các ô đang nhìn thấy. Ảnh tự ẩn sau tối đa 30 giây; tắt rồi bật lại tùy chọn để kiểm tra quyền và tải lại.</p>}
+      {mode === "list" ? <CalendarList rows={sorted} campaignName={campaignName} ownerLabel={ownerLabel} open={open} thumbnail={thumbnail} /> : <>
         <div className="mk-calendar-toolbar">
           <button aria-label={mode === "month" ? "Tháng trước" : "Tuần trước"} onClick={() => navigate(-1)}>← Trước</button>
           <h3>{mode === "month" ? `Tháng ${cursor.getUTCMonth() + 1}/${cursor.getUTCFullYear()}` : `${dayKey(dates[0])} — ${dayKey(dates[6])}`}</h3>
@@ -139,6 +152,7 @@ function Calendar() {
                   event.dataTransfer.effectAllowed = "move";
                   setDragging(true);
                 }} onDragEnd={endDrag}>
+                {thumbnail(row)}
                 <span>{localDateTime(row.slot!.at).slice(11)} · {slotLabel(row.slot)}</span>
                 <strong>{row.item.title}</strong>
                 <span>{campaignName(row.item.campaign_id)} · {row.item.content_line}</span>
@@ -170,14 +184,14 @@ function CalendarStatus({ row }: { row: CalendarEntry }) {
   </span>;
 }
 
-function CalendarList({ rows, campaignName, ownerLabel, open }: {
-  rows: CalendarEntry[]; campaignName: (id: string) => string; ownerLabel: (id: string | null) => string; open: (id: string) => void;
+function CalendarList({ rows, campaignName, ownerLabel, open, thumbnail }: {
+  rows: CalendarEntry[]; campaignName: (id: string) => string; ownerLabel: (id: string | null) => string; open: (id: string) => void; thumbnail: (row: CalendarEntry) => ReactNode;
 }) {
   if (!rows.length) return <Empty title="Chưa có nội dung phù hợp">Thay đổi bộ lọc để xem lịch.</Empty>;
   return <div className="mk-table-wrap"><table className="mk-table">
     <thead><tr><th>Nội dung</th><th>Khung giờ · Việt Nam</th><th>Xuất bản</th><th>Người phụ trách</th></tr></thead>
     <tbody>{rows.map((row) => <tr key={row.item.id}>
-      <td><button onClick={() => open(row.item.id)}>{row.item.title}</button><small>{campaignName(row.item.campaign_id)} · {row.item.content_line}</small></td>
+      <td><button onClick={() => open(row.item.id)}>{thumbnail(row)}{row.item.title}</button><small>{campaignName(row.item.campaign_id)} · {row.item.content_line}</small></td>
       <td>{row.slot ? <>{dateTime(row.slot.at)}<small>{slotLabel(row.slot)}</small></> : "Chưa đặt giờ"}</td>
       <td><CalendarStatus row={row} /></td><td>{ownerLabel(row.item.assignee_id)}</td>
     </tr>)}</tbody>
