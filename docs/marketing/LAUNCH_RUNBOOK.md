@@ -11,6 +11,7 @@ Dùng một dự án Supabase staging riêng và một deployment preview giới
 5. `20261105000200_marketing_video_reports.sql`
 6. `20261106000100_marketing_hardening.sql`
 7. `20261106000200_marketing_kpi_revisions.sql`
+8. `20261108000100_marketing_task_links.sql`
 
 Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration đã áp dụng và cách truy cập bản sao lưu. Kiểm tra `marketing-originals` và `marketing-footage` là bucket riêng tư, quyền SELECT/INSERT khớp với chính sách Marketing và các chính sách Storage có sẵn. Dùng tài khoản thật của staging để thử upload, tải private và phát/seek media qua URL ký 60 giây. Kiểm tra quyền khi nguồn bị thu hồi, link đã phát hành hết hạn, file sai MIME và người ngoài team.
 
@@ -25,6 +26,7 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 | Hiệu năng | Đo p50/p95 cho Overview, list theo team, mở Studio, tải preview và PDF/XLSX trên dữ liệu staging có kích thước dự kiến. Theo dõi 429/503, kích thước response, truy vấn chậm và bộ nhớ export. Kiểm tra truy vấn bằng EXPLAIN trên staging. |
 | Dashboard cũ | Login, Task, Email/Calendar, Báo cáo, catalog, điều hướng desktop/mobile và dữ liệu chưa lưu khi quay lại iframe. |
 | KPI Campaign | Representative lưu đề xuất có lý do, Leader cùng team hoặc Admin xác nhận đúng phiên bản. Kiểm tra KPI gốc và bản duyệt đăng vẫn sử dụng mốc phiên bản tương ứng. |
+| Liên kết Task | Gắn Task có sẵn vào nội dung, đối chiếu trạng thái Task, gỡ có lý do và xem lịch sử. Hoàn thành Task giữ quy trình duyệt nội dung độc lập. |
 | Content Calendar | Đối chiếu giờ đề xuất, khung giờ trong bản duyệt và trạng thái Meta. Kiểm tra lịch theo giờ Việt Nam, biên nhận thiếu giờ đăng và cảnh báo đang đối soát. |
 | Báo cáo | Kỳ tuần/tháng theo giờ Việt Nam, trường thiếu hiển thị đúng, approval ràng buộc phiên bản và hai định dạng mở được bằng ứng dụng đích. |
 

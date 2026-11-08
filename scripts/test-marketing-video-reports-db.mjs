@@ -10,7 +10,8 @@ const root = path.resolve(import.meta.dirname, '..');
 const moduleName = process.env.MARKETING_PGLITE_MODULE;
 const { PGlite } = await import(moduleName ? pathToFileURL(path.resolve(moduleName)).href : '@electric-sql/pglite');
 const db = new PGlite();
-const kpiRevisions = process.argv.includes('--kpi-revisions');
+const taskLinks = process.argv.includes('--task-links');
+const kpiRevisions = taskLinks || process.argv.includes('--kpi-revisions');
 const hardening = kpiRevisions || process.argv.includes('--hardening');
 try {
   await db.exec(`
@@ -27,12 +28,20 @@ try {
       check(role in('Admin','PR Leader','PR Representative','Viewer')), primary key(user_id, role));
   `);
   await db.exec(`create schema storage; create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]); create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,metadata jsonb,unique(bucket_id,name));alter table storage.objects enable row level security;grant usage on schema storage to authenticated;grant select,insert on storage.objects to authenticated;`);
+  if (taskLinks) await db.exec(`
+    create table public.tasks(id text primary key,title text not null,owner_id uuid references public.profiles(id),created_by uuid references public.profiles(id),deadline date,status text,deleted_at timestamptz,version bigint not null default 1);
+    alter table public.tasks enable row level security;
+    grant select on public.tasks to authenticated;
+    create function public.current_user_active() returns boolean language sql security definer set search_path='' as $$select exists(select 1 from public.profiles where id=auth.uid() and status='active')$$;
+    create policy task_fixture_read on public.tasks for select to authenticated using (deleted_at is null and public.current_user_active());
+  `);
   if (!process.argv.includes('--without-migration')) {
     const files = (await readdir(path.join(root, 'supabase/migrations'))).filter(file => /_marketing_(foundation|knowledge|creative|publishing|video_reports)\.sql$/.test(file)).sort();
 
     for (const file of files) await db.exec(await readFile(path.join(root, 'supabase/migrations', file), 'utf8'));
     if (hardening) await db.exec(await readFile(path.join(root, 'supabase/migrations/20261106000100_marketing_hardening.sql'), 'utf8'));
     if (kpiRevisions) await db.exec(await readFile(path.join(root, 'supabase/migrations/20261106000200_marketing_kpi_revisions.sql'), 'utf8'));
+    if (taskLinks) await db.exec(await readFile(path.join(root,'supabase/migrations/20261108000100_marketing_task_links.sql'),'utf8'));
   }
   for (const file of ['marketing_foundation.test.sql','marketing_knowledge.test.sql','marketing_creative.test.sql','marketing_publishing.test.sql']) {
     await db.exec(await readFile(path.join(root,'supabase/tests',file),'utf8'));
@@ -45,6 +54,10 @@ try {
   if (kpiRevisions) {
     await db.exec(await readFile(path.join(root,'supabase/tests/marketing_kpi_revisions.test.sql'),'utf8'));
     console.log('Marketing KPI revision SQL passed.');
+  }
+  if (taskLinks) {
+    await db.exec(await readFile(path.join(root,'supabase/tests/marketing_task_links.test.sql'),'utf8'));
+    console.log('Marketing Task link SQL passed.');
   }
   // Keep the rollback-only SQL fixture alive for actual parser -> RPC -> stored JSON checks.
   await db.exec((await readFile(path.join(root, 'supabase/tests/marketing_video_reports.test.sql'), 'utf8')).replace(/rollback;\s*$/, ''));

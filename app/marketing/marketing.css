@@ -18,3 +18,6 @@
 
 .mk-calendar-state { display: inline-block; color: var(--mk-ink, #25252b); font-weight: 600; }
 .mk-calendar-state.mk-calendar-attention { color: #8b4b10; }
+
+.mk-task-link { padding: 12px 0; border-bottom: 1px solid var(--mk-border); overflow-wrap: anywhere; }
+.mk-task-link h3 { margin: 0; }
