@@ -54,3 +54,16 @@ test('Calendar does not promote old cancellations, ambiguous outcomes, resolved 
   assert.equal(entry([{...job,status:'cancel_pending',receipt:{verified:true,state:'remote_scheduled'}}]).state,'cancel_pending');
   assert.equal(entry([{...job,team_id:'other'}]).publication,null);
 });
+
+test('Calendar exposes only final image IDs and versions bound to the sealed approval', () => {
+  const id='11111111-1111-4111-8111-111111111111';
+  const source='22222222-2222-4222-8222-222222222222';
+  const media={asset_id:id,asset_version:3,byte_size:45,sha256:'a'.repeat(64)};
+  const sealed={...snapshot,snapshot:{...snapshot.snapshot,final_asset_ids:[id],media:[media,{...media,asset_id:source}]}};
+  const preview=entry([job],[sealed]).publication.approval.finalAssets;
+  assert.deepEqual(preview,[{id,version:3}]);
+  assert.doesNotMatch(JSON.stringify(preview),/sha256|byte_size|private/);
+  for(const patch of [{final_asset_ids:[id,id]},{media:[{...media,asset_version:0}]},{media:[{...media,sha256:'bad'}]},{media:[]},{final_asset_ids:['invalid']}]) {
+    assert.deepEqual(entry([job],[{...sealed,snapshot:{...sealed.snapshot,...patch}}]).publication.approval.finalAssets,[]);
+  }
+});

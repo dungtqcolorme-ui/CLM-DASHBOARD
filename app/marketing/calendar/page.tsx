@@ -6,6 +6,7 @@ import { calendarDay, calendarEntries, type CalendarEntry, type CalendarEvidence
 import { Badge, Empty, Field, PageHeader, Panel, dateTime, lines, localDateTime } from "../components";
 import { useMarketing } from "../workspace";
 import { useOperation, usePhaseFive } from "../video/use-phase-five";
+import { CalendarMediaPreview, type CalendarMediaAccess } from "./media-preview";
 
 const dayMs = 86_400_000;
 const modes = [["month", "Tháng"], ["week", "Tuần"], ["list", "Danh sách"]] as const;
@@ -123,7 +124,7 @@ function Calendar() {
     </Panel>
     <dialog ref={dialog} className="mk-dialog" onClose={() => setDetailId(null)} aria-label={detail ? `Chi tiết nội dung: ${detail.item.title}` : "Chi tiết nội dung"}>
       {detail && <Panel title={detail.item.title} action={<button onClick={() => setDetailId(null)}>Đóng chi tiết</button>}>
-        <CalendarDetails row={detail} owner={ownerLabel(detail.item.assignee_id)} campaign={campaignName(detail.item.campaign_id)} />
+        <CalendarDetails row={detail} owner={ownerLabel(detail.item.assignee_id)} campaign={campaignName(detail.item.campaign_id)} access={remote} />
         <div className="mk-actions">
           <Link className="mk-button mk-primary" href={href(`/marketing/studio?content=${detail.item.id}&campaign=${detail.item.campaign_id}`)}>Mở trong Studio</Link>
           <Link className="mk-button" href={href(`/marketing/approvals?campaign=${detail.item.campaign_id}`)}>Mở Approval Inbox</Link>
@@ -153,7 +154,7 @@ function CalendarList({ rows, campaignName, ownerLabel, open }: {
   </table></div>;
 }
 
-function CalendarDetails({ row, owner, campaign }: { row: CalendarEntry; owner: string; campaign: string }) {
+function CalendarDetails({ row, owner, campaign, access }: { row: CalendarEntry; owner: string; campaign: string; access: CalendarMediaAccess }) {
   const { item, publication, alerts } = row;
   const approval = publication?.approval;
   const activePublication = ["approved", "scheduled", "published"].includes(item.publishing_status);
@@ -161,6 +162,9 @@ function CalendarDetails({ row, owner, campaign }: { row: CalendarEntry; owner: 
   return <>
     <div className="mk-actions"><Badge status={item.production_status} /><CalendarStatus row={row} /></div>
     <p className="mk-preserve">{item.caption || "Chưa có caption"}</p>
+    {activePublication && publication && approval && approval.finalAssets.length > 0 && <CalendarMediaPreview
+      key={`${publication.id}:${approval.finalAssets.map((asset) => `${asset.id}:${asset.version}`).join(",")}`}
+      jobId={publication.id} assets={approval.finalAssets} access={access} />}
     <dl className="mk-definition">
       <dt>Campaign · Tuyến bài</dt><dd>{campaign} · {item.content_line}</dd>
       <dt>Kênh / Page</dt><dd>{approval ? `Facebook · ${approval.pageName || "Page trong bản duyệt"}` : "Chưa có Page trong bản duyệt"}</dd>

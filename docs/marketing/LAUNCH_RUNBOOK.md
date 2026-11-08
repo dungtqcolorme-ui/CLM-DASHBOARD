@@ -27,7 +27,7 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 | Dashboard cũ | Login, Task, Email/Calendar, Báo cáo, catalog, điều hướng desktop/mobile và dữ liệu chưa lưu khi quay lại iframe. |
 | KPI Campaign | Representative lưu đề xuất có lý do, Leader cùng team hoặc Admin xác nhận đúng phiên bản. Kiểm tra KPI gốc và bản duyệt đăng vẫn sử dụng mốc phiên bản tương ứng. |
 | Liên kết Task | Gắn Task có sẵn vào nội dung, đối chiếu trạng thái Task, gỡ có lý do và xem lịch sử. Hoàn thành Task giữ quy trình duyệt nội dung độc lập. |
-| Content Calendar | Đối chiếu giờ đề xuất, khung giờ trong bản duyệt và trạng thái Meta. Kiểm tra lịch theo giờ Việt Nam, biên nhận thiếu giờ đăng và cảnh báo đang đối soát. |
+| Content Calendar | Đối chiếu giờ đề xuất, khung giờ trong bản duyệt và trạng thái Meta. Kiểm tra lịch theo giờ Việt Nam, biên nhận thiếu giờ đăng và cảnh báo đang đối soát. Mở ảnh trong chi tiết bài: đúng thứ tự ảnh cuối từ bản duyệt, không lộ đường dẫn Storage, tự ẩn tối đa 30 giây; thu hồi quyền rồi tải lại phải bị chặn, đóng/đổi scope phải gỡ ảnh. |
 | Báo cáo | Kỳ tuần/tháng theo giờ Việt Nam, trường thiếu hiển thị đúng, approval ràng buộc phiên bản và hai định dạng mở được bằng ứng dụng đích. |
 
 Ngân sách database tính theo phút và theo tài khoản. Mutation thông thường 240, tạo báo cáo 12, yêu cầu render 6, xuất báo cáo 10. Command bị rollback cũng rollback bộ đếm. Emergency Hold vẫn qua kiểm tra quyền và lý do khi chạm ngân sách. Các giới hạn này không bao phủ truy vấn đọc trực tiếp hoặc request vô danh. Chỉ mở rộng nhóm pilot sau khi theo dõi mức dùng và cấu hình giới hạn hạ tầng tương ứng. Giữ nguyên RLS và quyền riêng tư cho dữ liệu nguồn trong mọi phép đo.

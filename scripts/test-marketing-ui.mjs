@@ -70,7 +70,7 @@ const api=load('app/api/marketing/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
 const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
-const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export','readiness','calendar','tasks'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
+const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export','readiness','calendar','calendar/media','tasks'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
 const env=await readFile('.env.local','utf8');const supabaseUrl=env.match(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)?.[1];
 assert.ok(supabaseUrl,'Public Supabase URL is required for the client SDK storage key');const storageKey=`sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 const browser=await playwright.chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});

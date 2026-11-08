@@ -1,5 +1,6 @@
 import { utcToVietnamLocal } from "@/lib/marketing/domain";
 import { inputTimestamp } from "@/lib/marketing/input";
+import type { MediaAttestation } from "@/lib/marketing/publishing-types";
 import type { PublishingIncident, PublishingJob } from "@/lib/marketing/publishing-types";
 import type { MarketingContent, PublishingStatus } from "@/lib/marketing/types";
 
@@ -13,7 +14,7 @@ export type CalendarIncidentRow = Pick<PublishingIncident, "id" | "team_id" | "c
 export type CalendarPublication = {
   id: string; teamId: string; campaignId: string; contentId: string; createdAt: string;
   status: PublishingJob["status"];
-  approval: { at: string | null; slot: string; approverId: string; contentVersion: number; pageName: string | null } | null;
+  approval: { at: string | null; slot: string; approverId: string; contentVersion: number; pageName: string | null; finalAssets: { id: string; version: number }[] } | null;
   verification: "remote_scheduled" | "published" | null;
   observedAt: string | null;
 };
@@ -36,6 +37,25 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+/** Final outputs only; source photographs in a design are not the approved post images. */
+export function calendarFinalMedia(snapshot: Record<string, unknown>): MediaAttestation[] {
+  const ids = snapshot.final_asset_ids;
+  const media = snapshot.media;
+  if (!Array.isArray(ids) || !Array.isArray(media) || ids.length > 30 || media.length > 30 || new Set(ids).size !== ids.length) return [];
+  const result: MediaAttestation[] = [];
+  for (const id of ids) {
+    if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return [];
+    const matches = media.filter((value) => record(value).asset_id === id);
+    if (matches.length !== 1) return [];
+    const row = record(matches[0]);
+    if (!Number.isSafeInteger(row.asset_version) || Number(row.asset_version) < 1
+      || !Number.isSafeInteger(row.byte_size) || Number(row.byte_size) < 1 || Number(row.byte_size) > 8388608
+      || typeof row.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(row.sha256)) return [];
+    result.push({ asset_id: id, asset_version: Number(row.asset_version), byte_size: Number(row.byte_size), sha256: row.sha256 });
+  }
+  return result;
+}
+
 export function projectCalendarEvidence(jobs: CalendarJobRow[], approvals: CalendarApprovalRow[], incidents: CalendarIncidentRow[]): CalendarEvidence {
   const approvalById = new Map(approvals.map((approval) => [approval.id, approval]));
   const publications: CalendarPublication[] = jobs.map((job) => {
@@ -47,7 +67,8 @@ export function projectCalendarEvidence(jobs: CalendarJobRow[], approvals: Calen
       && snapshot.candidate_id === job.candidate_id && connection.id === job.connection_id
       && connection.provider === "facebook" && slot && slot === safeTime(job.scheduled_for)
       ? { at: safeTime(row.created_at), slot, approverId: row.approver_id, contentVersion: row.content_version,
-        pageName: typeof connection.page_name === "string" ? connection.page_name : null }
+        pageName: typeof connection.page_name === "string" ? connection.page_name : null,
+        finalAssets: calendarFinalMedia(snapshot).map((media) => ({ id: media.asset_id, version: media.asset_version })) }
       : null;
     const receipt = record(job.receipt);
     const verification = approval && (job.status === "published" || job.status === "remote_scheduled")
