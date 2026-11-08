@@ -63,6 +63,8 @@ Calendar shows the proposed hour until an active publication has a linked approv
 
 The detail dialog can load final PNG/JPEG images from the exact sealed approval, one image on demand. The user-scoped endpoint rechecks the approval binding, current asset version, rights and stored bytes, then rechecks access after downloading. It returns private, non-cacheable bytes without Storage paths or public URLs. Preview object URLs are revoked on close, navigation or access reset, and expire after at most 30 seconds (earlier if rights expire). A silent server-side rights change can remain visible until that short deadline; a reload always checks current rights. Calendar cells do not fetch thumbnails.
 
+Writers can drag Draft/Changes Requested content to a day in month/week view, or open its details using keyboard/touch to change its proposed Vietnam time. Dragging opens a proposal; only Save writes it. The existing user-JWT `update_content` command preserves caption/production fields and checks the original version; Changes Requested returns to Draft under that command's existing rules. On conflict, the entered time stays in the dialog and the writer must explicitly adopt the current content before retrying. Only Draft/Active Campaigns allow this editing. Approved/Scheduled items use the cancellation/reconciliation and human review flow in Approval Inbox; Calendar never changes their sealed slot. Closing or leaving Calendar discards the unsaved time proposal.
+
 ## Reports and rollback
 
 `PHASE5_REPORT.md` and `PHASE6_REPORT.md` capture verified behavior and the limits of local acceptance. The operator steps for staging, rollout, incident response and rollback are in `LAUNCH_RUNBOOK.md`. Use `FEATURE_READINESS.md` to track provider and workflow gaps.

@@ -23,3 +23,5 @@
 .mk-task-link h3 { margin: 0; }
 .mk-calendar-preview{display:grid;gap:12px;padding:16px;margin:16px 0;border:1px solid var(--mk-border);border-radius:12px}
 .mk-calendar-preview img{display:block;width:100%;max-height:360px;object-fit:contain;background:var(--mk-bg)}
+.mk-calendar-item[draggable=true]{cursor:grab}.mk-calendar-item[draggable=true]:active{cursor:grabbing}.mk-calendar-drop-target{outline:1px dashed #c8c1bc;outline-offset:-3px}.mk-calendar-drop-target:hover{background:var(--mk-red-tint)}
+.mk-calendar-reschedule{padding:16px;margin:16px 0;border:1px solid var(--mk-border);border-radius:12px}.mk-calendar-reschedule h3{margin-top:0}

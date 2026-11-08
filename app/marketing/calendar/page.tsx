@@ -7,6 +7,8 @@ import { Badge, Empty, Field, PageHeader, Panel, dateTime, lines, localDateTime 
 import { useMarketing } from "../workspace";
 import { useOperation, usePhaseFive } from "../video/use-phase-five";
 import { CalendarMediaPreview, type CalendarMediaAccess } from "./media-preview";
+import { calendarDropTime, canMoveCalendarContent } from "@/lib/marketing/calendar-schedule";
+import { CalendarScheduleForm } from "./schedule-form";
 
 const dayMs = 86_400_000;
 const modes = [["month", "Tháng"], ["week", "Tuần"], ["list", "Danh sách"]] as const;
@@ -29,7 +31,7 @@ export default function CalendarPage() {
 }
 
 function Calendar() {
-  const { data, selected, href, refresh, phaseFiveAccessVersion } = useMarketing();
+  const { data, selected, href, refresh, phaseFiveAccessVersion, canWrite } = useMarketing();
   const remote = usePhaseFive<CalendarEvidence>("calendar", data.profile.id, phaseFiveAccessVersion);
   const reload = useOperation();
   const [mode, setMode] = useState<Mode>("month");
@@ -39,6 +41,9 @@ function Calendar() {
   const [channel, setChannel] = useState("");
   const [day, setDay] = useState(() => calendarDay(new Date().toISOString()));
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [proposal, setProposal] = useState<{ contentId: string; time: string } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragId = useRef<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const items = data.contentItems.filter((item) => !selected || item.campaign_id === selected);
   const ownerLabel = (id: string | null) => !id ? "Chưa phân công" : id === data.profile.id ? data.profile.fullName : id;
@@ -73,6 +78,10 @@ function Calendar() {
     if (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) setDay(value);
   }
   const campaignName = (id: string) => data.campaigns.find((campaign) => campaign.id === id)?.name ?? "Campaign";
+  const canMove = (row: CalendarEntry) => canMoveCalendarContent(row.item, data.campaigns.find((campaign) => campaign.id === row.item.campaign_id), canWrite);
+  function open(id: string) { setProposal(null); setDetailId(id); }
+  function close() { setDetailId(null); setProposal(null); }
+  function endDrag() { dragId.current = null; setDragging(false); }
 
   return <>
     <PageHeader title="Content Calendar" description="Lịch theo giờ Việt Nam, từ giờ đề xuất đến bản duyệt và biên nhận Meta đã lưu." />
@@ -98,7 +107,8 @@ function Calendar() {
           if (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(event.target.value)) setDay(event.target.value);
         }} /></Field>}
       </div>
-      {mode === "list" ? <CalendarList rows={sorted} campaignName={campaignName} ownerLabel={ownerLabel} open={setDetailId} /> : <>
+      {canWrite && <p id="mk-calendar-reschedule-help" className="mk-muted">Kéo bài nháp/cần chỉnh sửa sang ngày khác để đề xuất giờ mới, rồi bấm lưu trong chi tiết. Bạn cũng có thể mở bài bằng bàn phím hoặc chạm để đổi giờ.</p>}
+      {mode === "list" ? <CalendarList rows={sorted} campaignName={campaignName} ownerLabel={ownerLabel} open={open} /> : <>
         <div className="mk-calendar-toolbar">
           <button aria-label={mode === "month" ? "Tháng trước" : "Tuần trước"} onClick={() => navigate(-1)}>← Trước</button>
           <h3>{mode === "month" ? `Tháng ${cursor.getUTCMonth() + 1}/${cursor.getUTCFullYear()}` : `${dayKey(dates[0])} — ${dayKey(dates[6])}`}</h3>
@@ -108,9 +118,27 @@ function Calendar() {
           {weekdays.map((label) => <div className="mk-weekday" key={label}>{label}</div>)}
           {dates.map((date) => {
             const key = dayKey(date);
-            return <div key={key} className={`mk-calendar-day ${date.getUTCMonth() !== cursor.getUTCMonth() && mode === "month" ? "mk-outside-month" : ""}`}>
+            return <div key={key} className={`mk-calendar-day ${date.getUTCMonth() !== cursor.getUTCMonth() && mode === "month" ? "mk-outside-month" : ""}${dragging ? " mk-calendar-drop-target" : ""}`}
+              onDragOver={(event) => { if (dragId.current && event.dataTransfer.types.includes("application/x-colorme-calendar")) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
+              onDrop={(event) => {
+                const id = dragId.current;
+                const row = rows.find((row) => row.item.id === id);
+                if (!id || event.dataTransfer.getData("application/x-colorme-calendar") !== id || !row || !canMove(row)) { endDrag(); return; }
+                event.preventDefault();
+                setProposal({ contentId: id, time: calendarDropTime(row.item.proposed_publish_at, key) });
+                setDetailId(id);
+                endDrag();
+              }}>
               <time dateTime={key}>{date.getUTCDate()}</time>
-              {byDay.get(key)?.map((row) => <button key={row.item.id} className="mk-calendar-item" onClick={() => setDetailId(row.item.id)}>
+              {byDay.get(key)?.map((row) => <button key={row.item.id} className="mk-calendar-item" onClick={() => open(row.item.id)}
+                draggable={canMove(row)} aria-describedby={canMove(row) ? "mk-calendar-reschedule-help" : undefined}
+                onDragStart={(event) => {
+                  if (!canMove(row)) { event.preventDefault(); return; }
+                  dragId.current = row.item.id;
+                  event.dataTransfer.setData("application/x-colorme-calendar", row.item.id);
+                  event.dataTransfer.effectAllowed = "move";
+                  setDragging(true);
+                }} onDragEnd={endDrag}>
                 <span>{localDateTime(row.slot!.at).slice(11)} · {slotLabel(row.slot)}</span>
                 <strong>{row.item.title}</strong>
                 <span>{campaignName(row.item.campaign_id)} · {row.item.content_line}</span>
@@ -122,9 +150,11 @@ function Calendar() {
         {!dates.some((date) => byDay.has(dayKey(date))) && <Empty title="Chưa có nội dung trong khoảng này">Chuyển sang Danh sách để xem nội dung chưa đặt giờ.</Empty>}
       </>}
     </Panel>
-    <dialog ref={dialog} className="mk-dialog" onClose={() => setDetailId(null)} aria-label={detail ? `Chi tiết nội dung: ${detail.item.title}` : "Chi tiết nội dung"}>
-      {detail && <Panel title={detail.item.title} action={<button onClick={() => setDetailId(null)}>Đóng chi tiết</button>}>
-        <CalendarDetails row={detail} owner={ownerLabel(detail.item.assignee_id)} campaign={campaignName(detail.item.campaign_id)} access={remote} />
+    <dialog ref={dialog} className="mk-dialog" onCancel={(event) => { event.preventDefault(); close(); }} aria-label={detail ? `Chi tiết nội dung: ${detail.item.title}` : "Chi tiết nội dung"}>
+      {detail && <Panel title={detail.item.title} action={<button onClick={close}>Đóng chi tiết</button>}>
+        <CalendarDetails key={`${detail.item.id}:${proposal?.contentId === detail.item.id ? proposal.time : "detail"}`}
+          row={detail} owner={ownerLabel(detail.item.assignee_id)} campaign={campaignName(detail.item.campaign_id)} access={remote}
+          proposedTime={proposal?.contentId === detail.item.id ? proposal.time : undefined} />
         <div className="mk-actions">
           <Link className="mk-button mk-primary" href={href(`/marketing/studio?content=${detail.item.id}&campaign=${detail.item.campaign_id}`)}>Mở trong Studio</Link>
           <Link className="mk-button" href={href(`/marketing/approvals?campaign=${detail.item.campaign_id}`)}>Mở Approval Inbox</Link>
@@ -154,7 +184,7 @@ function CalendarList({ rows, campaignName, ownerLabel, open }: {
   </table></div>;
 }
 
-function CalendarDetails({ row, owner, campaign, access }: { row: CalendarEntry; owner: string; campaign: string; access: CalendarMediaAccess }) {
+function CalendarDetails({ row, owner, campaign, access, proposedTime }: { row: CalendarEntry; owner: string; campaign: string; access: CalendarMediaAccess; proposedTime?: string }) {
   const { item, publication, alerts } = row;
   const approval = publication?.approval;
   const activePublication = ["approved", "scheduled", "published"].includes(item.publishing_status);
@@ -162,6 +192,7 @@ function CalendarDetails({ row, owner, campaign, access }: { row: CalendarEntry;
   return <>
     <div className="mk-actions"><Badge status={item.production_status} /><CalendarStatus row={row} /></div>
     <p className="mk-preserve">{item.caption || "Chưa có caption"}</p>
+    <CalendarScheduleForm item={item} initialTime={proposedTime} access={access} />
     {activePublication && publication && approval && approval.finalAssets.length > 0 && <CalendarMediaPreview
       key={`${publication.id}:${approval.finalAssets.map((asset) => `${asset.id}:${asset.version}`).join(",")}`}
       jobId={publication.id} assets={approval.finalAssets} access={access} />}

@@ -16,6 +16,7 @@ import {testCreativeWorkflow} from './marketing-creative-ui-checks.mjs';
 import {testPublishingWorkflow} from './marketing-publishing-ui-checks.mjs';
 import {testTaskLinksWorkflow} from './marketing-task-links-ui-checks.mjs';
 import {testCalendarPublication} from './marketing-calendar-ui-checks.mjs';
+import {testCalendarReschedule} from './marketing-calendar-schedule-ui-checks.mjs';
 import {testKpiRevisionWorkflow} from './marketing-kpi-ui-checks.mjs';
 import {testVideoReportsWorkflow} from './marketing-video-reports-ui-checks.mjs';
 import {randomUUID} from 'node:crypto';
@@ -198,6 +199,8 @@ try{
  await testKpiRevisionWorkflow({page:p,db,base,actors,team,cmd,context,shot,report});
  checkpoint('Calendar verified receipt projection');lastPage=p;
  calendarPublishedId=await testCalendarPublication({page:p,db,base,actors,team,campaign,shot,mainCommand:cmd,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/publishing'),serviceCommand,report});
+ checkpoint('Calendar proposed time changes');lastPage=p;
+ await testCalendarReschedule({page:p,db,base,actors,campaign,context,mainCommand:cmd,report,shot});
  checkpoint('Optional Task links');lastPage=p;
  await testTaskLinksWorkflow({page:p,db,base,actors,team,campaign,mainCommand:cmd,context,shot,report});
  checkpoint('Phase6 Admin readiness');

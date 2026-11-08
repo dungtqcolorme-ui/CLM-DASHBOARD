@@ -68,6 +68,8 @@ export async function testCalendarPublication({ page, db, base, actors, team, ca
   const drawer = page.getByRole('dialog');
   await drawer.getByText('Facebook · Page kiểm thử lịch',{exact:true}).waitFor();
   await drawer.getByText('Lần ghi nhận biên nhận',{exact:true}).waitFor();
+  assert.equal(await drawer.getByLabel('Giờ đề xuất mới · giờ Việt Nam',{exact:true}).count(),0);
+  assert.equal(await chip.getAttribute('draggable'),'false');
   assert.equal(await drawer.getByRole('img',{name:'Ảnh trong bản duyệt · 1 / 1'}).count(),0);
   await page.clock.install();
   await drawer.getByRole('button',{name:'Xem ảnh trong bản duyệt',exact:true}).click();
