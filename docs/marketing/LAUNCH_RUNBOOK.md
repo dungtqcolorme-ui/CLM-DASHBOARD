@@ -66,9 +66,27 @@ Ngân sách database tính theo phút và theo tài khoản. Mutation thông th�
 
 Thumbnail Calendar tắt mặc định; bật để kiểm tra ảnh WebP tối đa 160×90, tải tuần tự khi ô lịch đi vào viewport, gỡ sau tối đa 30 giây và không tự tải lại. Tắt tùy chọn/đổi scope phải gỡ ảnh và hủy request chờ. Đối chiếu ảnh đầu từ đúng bản duyệt, metadata đã bỏ, thu hồi quyền trong lúc resize phải chặn response. Kiểm tra 429 và bộ nhớ/timeout của Sharp trên runtime staging; mỗi tiến trình chỉ chạy một thumbnail native tại một thời điểm. Không ghi ảnh thu nhỏ thành object Storage hay URL công khai.
 
+## Xác minh Page Color ME Partnership
+
+Page ID mục tiêu do người dùng cung cấp là `103245086061688`. Trước khi chạy, thu hồi token đã chia sẻ trong chat và cấp Page Access Token mới cho đúng ứng dụng Meta và Page. Nạp các biến dưới đây qua kho bí mật hoặc file env có quyền truy cập giới hạn nằm ngoài repo. [Cách Meta cấp Page Access Token](https://www.postman.com/meta/facebook/request/bqfxwbp/get-access-tokens-of-pages-you-manage)
+
+| Biến | Giá trị |
+|---|---|
+| `META_PAGE_ID` | `103245086061688` |
+| `META_GRAPH_VERSION` | Phiên bản Graph API đã chọn trong ứng dụng Meta, dạng `vNN.N` |
+| `META_PAGE_ACCESS_TOKEN` | Page Access Token mới |
+| `META_APP_SECRET` | App Secret của cùng ứng dụng nếu Meta yêu cầu `appsecret_proof` |
+
+```sh
+pnpm verify:marketing:meta-page
+node --env-file=/secure/path/meta.env scripts/verify-marketing-meta-page.mjs
+```
+
+Chọn một trong hai cách chạy. Lệnh gọi `GET /me?fields=id,name` để lấy danh tính mà token đại diện và đối chiếu ID với `META_PAGE_ID`. Khi khớp, lệnh in ID và tên Page để Admin xác nhận. Kết quả này chỉ xác minh danh tính Page. Tiếp tục xác minh quyền, Business tasks và App Review trước khi thử xuất bản. [Meta Graph API Explorer](https://developers.facebook.com/docs/graph-api/guides/explorer/)
+
 ## Tích hợp cần xử lý trước khi bật live
 
-- **Meta**. Hoàn thành app review và xác minh đúng Page ColorME Partnership qua tài khoản Admin, Page ID thật, Business tasks, quyền và phiên bản Graph. Triển khai adapter production và mã hóa/rotation token sau khi xác minh. `103245086061688` hiện chỉ là gợi ý Business Suite. Chạy dry run bằng test Page được phê duyệt trước khi bật live. Đối chiếu receipt, quota, lỗi timeout và quy trình hủy lịch từ Meta.
+- **Meta**. Xác minh Page theo quy trình trên, kiểm tra Business tasks và quyền, rồi hoàn thành App Review. Triển khai adapter production và quy trình quản lý token. Chạy dry run bằng test Page được phê duyệt trước khi bật live. Đối chiếu receipt, quota, lỗi timeout và quy trình hủy lịch từ Meta.
 - **Worker xuất bản**. Chọn máy chạy worker và lịch được hosting plan hỗ trợ. Bật theo feature flag sau kiểm thử lease, idempotency, reconciliation và cảnh báo. Chỉ phê duyệt và lên lịch từng snapshot bằng Leader/Admin khác Creator.
 - **Google Drive**. Tạo OAuth riêng cho phạm vi Drive tối thiểu. Admin xác nhận folder whitelist, cấp quyền theo Campaign và thử revoke/moved file. Quyền đọc Drive và quyền xuất bản asset được xét riêng.
 - **Video**. Chọn renderer và môi trường worker sau kiểm tra license, chi phí, giới hạn CPU/memory/timeout/concurrency. Chứng minh worker tạo artifact thật và lưu digest/receipt cho đúng version. Tích hợp STT từ âm thanh thật cần cấu hình riêng.

@@ -41,7 +41,7 @@ The following are references from the supplied specification, **not verified ins
 
 ## External identities
 
-Meta remains **Not Connected**. `103245086061688` is only the user-provided Business Suite asset hint; it was not used as a verified Page ID. No Page name/ID, tasks, scopes, insight permission, token, scheduler or cancellation capability has been verified.
+Meta remains **Not Connected**. The user supplied `103245086061688` as the target Page ID for Color ME Partnership. The [runbook](LAUNCH_RUNBOOK.md) provides a read-only Graph identity check for an authorized Page Access Token. Page identity, tasks, scopes, insights, scheduling and cancellation still require live verification.
 
 Google Calendar/Gmail OAuth does not authorize Drive. Drive, agent execution and video rendering remain unconfigured. Phase 1 stores no OAuth credentials, media, private source documents or personal comments.
 
