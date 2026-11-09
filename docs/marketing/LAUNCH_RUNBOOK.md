@@ -2,7 +2,7 @@
 
 ## Môi trường và thứ tự áp dụng
 
-Dùng một dự án Supabase staging riêng và một deployment preview giới hạn người truy cập. Chuẩn bị bản sao đã loại dữ liệu nhạy cảm hoặc tài khoản kiểm thử. Áp dụng các migration theo thứ tự sau bằng quy trình quản trị Supabase của dự án.
+Dùng một dự án Supabase staging riêng và một deployment preview giới hạn người truy cập. Chuẩn bị bản sao đã loại dữ liệu nhạy cảm hoặc tài khoản kiểm thử. Staging cần có schema Dashboard hiện hành, gồm hồ sơ, vai trò và Task. Áp dụng các migration Marketing theo thứ tự sau bằng quy trình quản trị Supabase của dự án.
 
 1. `20261104000100_marketing_foundation.sql`
 2. `20261104000200_marketing_knowledge.sql`
@@ -13,6 +13,7 @@ Dùng một dự án Supabase staging riêng và một deployment preview giới
 7. `20261106000200_marketing_kpi_revisions.sql`
 8. `20261108000100_marketing_task_links.sql`
 9. `20261108000200_marketing_calendar_thumbnails.sql`
+10. `20261109000100_marketing_notifications.sql`
 
 Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration đã áp dụng và cách truy cập bản sao lưu. Kiểm tra `marketing-originals` và `marketing-footage` là bucket riêng tư, quyền SELECT/INSERT khớp với chính sách Marketing và các chính sách Storage có sẵn. Dùng tài khoản thật của staging để thử upload, tải private và phát/seek media qua URL ký 60 giây. Kiểm tra quyền khi nguồn bị thu hồi, link đã phát hành hết hạn, file sai MIME và người ngoài team.
 
@@ -30,6 +31,8 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 | Liên kết Task | Gắn Task có sẵn vào nội dung, đối chiếu trạng thái Task, gỡ có lý do và xem lịch sử. Hoàn thành Task giữ quy trình duyệt nội dung độc lập. |
 | Content Calendar | Đối chiếu giờ đề xuất, khung giờ trong bản duyệt và trạng thái Meta. Kiểm tra lịch theo giờ Việt Nam, biên nhận thiếu giờ đăng và cảnh báo đang đối soát. Mở ảnh trong chi tiết bài: đúng thứ tự ảnh cuối từ bản duyệt, không lộ đường dẫn Storage, tự ẩn tối đa 30 giây; thu hồi quyền rồi tải lại phải bị chặn, đóng/đổi scope phải gỡ ảnh. |
 | Đổi lịch đề xuất | Kéo bản nháp sang ngày khác: chưa lưu thì DB không đổi; lưu giữ giờ Việt Nam, caption, Creator và hạn sản xuất/duyệt. Sửa đồng thời phải báo conflict, giữ giờ vừa nhập, chỉ thử lại sau khi lấy nội dung hiện tại. Kiểm tra thao tác bàn phím/chạm, Viewer, Campaign Paused/Hold và bài đã duyệt/lên lịch không được kéo sửa. |
+| Thông báo | Gửi duyệt bằng Representative và kiểm tra Leader cùng team nhận đúng phiên bản. Thử Admin nhiều vai trò, người ngoài team, người được giao bài, thu hồi membership và đánh dấu đã đọc. Đối chiếu sự cố Critical và Hold. Mục đã đọc vẫn giữ trạng thái của sự cố. |
+| So sánh Organic | Đối chiếu bài cùng Campaign, Page, tuyến, định dạng, cửa sổ và định nghĩa chỉ số. Mẫu mới hơn chuyển sang Paid/Unknown phải bị loại. Chỉ số thiếu giữ trạng thái chưa có dữ liệu. Báo cáo đã chốt giữ nguyên mẫu cũ. |
 | Báo cáo | Kỳ tuần/tháng theo giờ Việt Nam, trường thiếu hiển thị đúng, approval ràng buộc phiên bản và hai định dạng mở được bằng ứng dụng đích. |
 
 Ngân sách database tính theo phút và theo tài khoản. Mutation thông thường 240, tạo báo cáo 12, yêu cầu render 6, xuất báo cáo 10, tạo thumbnail Calendar 30. Command bị rollback cũng rollback bộ đếm; reservation thumbnail đã nhận vẫn tính nếu tải/xử lý ảnh sau đó thất bại. Emergency Hold vẫn qua kiểm tra quyền và lý do khi chạm ngân sách. Các giới hạn này không bao phủ truy vấn đọc trực tiếp hoặc request vô danh. Chỉ mở rộng nhóm pilot sau khi theo dõi mức dùng và cấu hình giới hạn hạ tầng tương ứng. Giữ nguyên RLS và quyền riêng tư cho dữ liệu nguồn trong mọi phép đo.

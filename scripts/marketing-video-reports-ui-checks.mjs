@@ -213,6 +213,23 @@ export async function testVideoReportsWorkflow({ page, db, base, actors, team, c
   await page.getByText("Organic đủ điều kiện · phase5-fixture-organic", { exact: true }).click();
   await page.getByText(observed.id, { exact: true }).waitFor();
   await page.getByText("Thu thập nguồn", { exact: true }).waitFor();
+  await reportIngest({
+    team_id: team.id, campaign_id: campaign.id, connection_id: connection.id, page_id: connection.page_id,
+    post_id: "phase5-fixture-peer", content_line: "Sharing", format: "text", window: "7d", eligibility: "organic",
+    reach: 150, views: null, reactions: 0, comments: 0, shares: 5, clicks: 0,
+    definitions: { reach: "people", views: "views", reactions: "reactions", comments: "comments", shares: "shares", clicks: "clicks" },
+    source_reference: "Mẫu đối chiếu QA", published_at: month + "-03T00:00:00Z", fetched_at: month + "-11T00:00:00Z",
+  });
+  await page.reload();
+  await page.getByLabel("Chọn báo cáo").selectOption(monthly.id);
+  const comparison = page.locator(".mk-panel:visible").filter({ has: page.getByRole("heading", { name: "So sánh Organic cùng nhóm", exact: true }) });
+  await comparison.getByRole("combobox", { name: "Bài tham chiếu Organic", exact: true }).selectOption(observed.id);
+  await comparison.getByRole("row").filter({ hasText: "phase5-fixture-peer" }).getByText("150", { exact: true }).waitFor();
+  await comparison.getByRole("combobox", { name: "Chỉ số đối chiếu Organic", exact: true }).selectOption("views");
+  await comparison.getByText("Chưa đủ bài có dữ liệu cùng định nghĩa để đối chiếu.", { exact: true }).waitFor();
+  await comparison.getByRole("combobox", { name: "Chỉ số đối chiếu Organic", exact: true }).selectOption("reach");
+  await page.getByText("5%", { exact: true }).waitFor();
+  report.checks.push("Matched Organic comparison reads a comparable saved post, preserves missing views and keeps the frozen report unchanged");
   await shot(page, "reports-organic-phase5");
 
   const viewer = await context(actors[3], { width: 390, height: 844 });

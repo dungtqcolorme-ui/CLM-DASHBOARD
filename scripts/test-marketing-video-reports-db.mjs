@@ -10,7 +10,8 @@ const root = path.resolve(import.meta.dirname, '..');
 const moduleName = process.env.MARKETING_PGLITE_MODULE;
 const { PGlite } = await import(moduleName ? pathToFileURL(path.resolve(moduleName)).href : '@electric-sql/pglite');
 const db = new PGlite();
-const thumbnails = process.argv.includes('--calendar-thumbnails');
+const notifications = process.argv.includes('--notifications');
+const thumbnails = notifications || process.argv.includes('--calendar-thumbnails');
 const taskLinks = thumbnails || process.argv.includes('--task-links');
 const kpiRevisions = taskLinks || process.argv.includes('--kpi-revisions');
 const hardening = kpiRevisions || process.argv.includes('--hardening');
@@ -44,6 +45,7 @@ try {
     if (kpiRevisions) await db.exec(await readFile(path.join(root, 'supabase/migrations/20261106000200_marketing_kpi_revisions.sql'), 'utf8'));
     if (taskLinks) await db.exec(await readFile(path.join(root,'supabase/migrations/20261108000100_marketing_task_links.sql'),'utf8'));
     if (thumbnails) await db.exec(await readFile(path.join(root,'supabase/migrations/20261108000200_marketing_calendar_thumbnails.sql'),'utf8'));
+    if (notifications) await db.exec(await readFile(path.join(root,'supabase/migrations/20261109000100_marketing_notifications.sql'),'utf8'));
   }
   for (const file of ['marketing_foundation.test.sql','marketing_knowledge.test.sql','marketing_creative.test.sql','marketing_publishing.test.sql']) {
     await db.exec(await readFile(path.join(root,'supabase/tests',file),'utf8'));
@@ -64,6 +66,10 @@ try {
   if (thumbnails) {
     await db.exec(await readFile(path.join(root,'supabase/tests/marketing_calendar_thumbnails.test.sql'),'utf8'));
     console.log('Marketing Calendar thumbnail budgets SQL passed.');
+  }
+  if (notifications) {
+    await db.exec(await readFile(path.join(root,'supabase/tests/marketing_notifications.test.sql'),'utf8'));
+    console.log('Marketing recipient notification SQL passed.');
   }
   // Keep the rollback-only SQL fixture alive for actual parser -> RPC -> stored JSON checks.
   await db.exec((await readFile(path.join(root, 'supabase/tests/marketing_video_reports.test.sql'), 'utf8')).replace(/rollback;\s*$/, ''));

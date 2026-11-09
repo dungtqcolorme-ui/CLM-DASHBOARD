@@ -7,6 +7,7 @@ import { dateTime, Field, Panel } from "../components";
 import { useMarketing } from "../workspace";
 import { useOperation, usePhaseFive, useVersionedDraft } from "../video/use-phase-five";
 import { phaseFiveCanWriteTeam } from "../video/access-scope";
+import { OrganicComparison } from "./organic-comparison";
 import { ReportMetricsView } from "./metrics";
 import { exactApproval, narrativeDigest, periodEnd } from "./report-model";
 import "../video/phase-five.css";
@@ -246,6 +247,7 @@ export default function ReportsWorkspace({ userId, accessVersion }: { userId: st
       <p>Diễn giải AI · NotConfigured</p>
     </Panel>
     {api.error && <p role="alert">{api.error}</p>}
+    {!api.error && <OrganicComparison key={"organic-comparison:" + selected} observations={workspace.observations} campaignId={selected} />}
     {canWrite && data.teams.some((team) => phaseFiveCanWriteTeam(data, team.id)) && <BuildReport key={selected} api={api} saved={(next) => { save(next); select(next.campaign_id ?? ""); }} />}
     <Panel title="Báo cáo đã lưu">
       {report ? <Field label="Chọn báo cáo"><select value={report.id} onChange={(e) => setId(e.target.value)}>

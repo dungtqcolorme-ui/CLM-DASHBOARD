@@ -122,6 +122,14 @@ export async function testCalendarPublication({ page, db, base, actors, team, ca
   assert.equal(await chip.locator('.mk-calendar-thumbnail img').count(),0);
   await page.getByRole('heading',{name:'Content Calendar',exact:true}).waitFor();
   await toggle.uncheck();page.off('request',trackThumbnail);
+  const notices = (await db.query(
+    "select kind,content_version from marketing_notifications where content_id=$1 and recipient_id=$2 and kind in ('approved','published') order by kind",
+    [content.id, representative.id],
+  )).rows;
+  assert.deepEqual(notices, [
+    { kind: 'approved', content_version: reviewing.version },
+    { kind: 'published', content_version: reviewing.version },
+  ]);
   report.checks.push('Calendar separates proposed and approved Vietnam slots, recognizes only verified remote receipts, and leaves actual publish time unknown when absent');
   report.checks.push('Calendar loads sealed private PNG on demand, expires its object URL after 30s, reloads with current rights and blocks revoked images without losing the workspace');
   report.checks.push('Calendar thumbnails are opt-in, lazy private WebP pixels at 90x90, expire without auto-refetch and reject revoked media while keeping the Calendar usable');

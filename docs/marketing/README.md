@@ -67,6 +67,16 @@ Enable **Ảnh thu nhỏ từ bản duyệt** to show the first sealed final ima
 
 Writers can drag Draft/Changes Requested content to a day in month/week view, or open its details using keyboard/touch to change its proposed Vietnam time. Dragging opens a proposal; only Save writes it. The existing user-JWT `update_content` command preserves caption/production fields and checks the original version; Changes Requested returns to Draft under that command's existing rules. On conflict, the entered time stays in the dialog and the writer must explicitly adopt the current content before retrying. Only Draft/Active Campaigns allow this editing. Approved/Scheduled items use the cancellation/reconciliation and human review flow in Approval Inbox; Calendar never changes their sealed slot. Closing or leaving Calendar discards the unsaved time proposal.
 
+## Approval Inbox notifications
+
+Open **Thông báo của tôi** in Approval Inbox. Review requests reach eligible Leader/Admin recipients. Change requests, approvals, publications and publishing failures reach the creator and assignee. Critical incidents reach the assignee and managers. Hold reaches managers. The list refreshes every 30 seconds while visible. The read receipt belongs to the recipient and remains separate from incident resolution. Event links show the stored content version when available. Notifications begin with events recorded after migration `20261109000100`.
+
+## Brief suggestions and Organic comparison
+
+Research suggests a content line when the brief matches keywords for one line. **Dùng tuyến đề xuất** changes the selection for the next proposal. Select a different line in the dropdown at any time.
+
+**So sánh Organic cùng nhóm** uses the newest observation for each post and measurement window. It groups observations by Campaign, Page, connection, content line, format, window and metric definition. The panel describes saved observations and displays the current Campaign objective where available. A historical per-post objective requires additional source data.
+
 ## Reports and rollback
 
 `PHASE5_REPORT.md` and `PHASE6_REPORT.md` capture verified behavior and the limits of local acceptance. The operator steps for staging, rollout, incident response and rollback are in `LAUNCH_RUNBOOK.md`. Use `FEATURE_READINESS.md` to track provider and workflow gaps.

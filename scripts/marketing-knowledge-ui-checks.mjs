@@ -27,7 +27,16 @@ export async function testKnowledgeWorkflow({page:p,db,base,actors,team,campaign
 
   await p.getByRole('button',{name:'Research',exact:true}).click();
   await p.getByRole('combobox',{name:/^Chế độ nghiên cứu/}).selectOption('internal_only');
-  await p.getByRole('textbox',{name:/^Từ khóa \/ câu hỏi nghiên cứu/}).fill('sinh viên');
+  const brief = p.getByRole('textbox',{name:/^Từ khóa \/ câu hỏi nghiên cứu/});
+  const line = p.getByRole('combobox',{name:'Tuyến bài cho đề xuất nội bộ',exact:true});
+  await brief.fill('Ghi nhận hoạt động tại booth Unitour');
+  assert.equal(await line.inputValue(),'Sharing');
+  await p.getByRole('button',{name:'Dùng tuyến đề xuất',exact:true}).click();
+  assert.equal(await line.inputValue(),'ColorMAP');
+  await brief.fill('Unitour và hướng dẫn kỹ năng');
+  assert.equal(await p.getByRole('button',{name:'Dùng tuyến đề xuất',exact:true}).count(),0);
+  await line.selectOption('Sharing');
+  await brief.fill('sinh viên');
   await p.getByRole('button',{name:'Chạy nghiên cứu',exact:true}).click();
   await p.getByText('Hoàn tất tìm nội bộ',{exact:true}).waitFor();
   assert.equal((await db.query('select * from marketing_research_runs')).rows[0].evidence.length,1);

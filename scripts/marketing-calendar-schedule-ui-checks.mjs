@@ -10,7 +10,20 @@ export async function testCalendarReschedule({page,db,base,actors,campaign,conte
   await page.getByLabel('Ngày đang xem').fill('2026-11-10');
   const chip=page.getByRole('button').filter({has:page.getByText(content.title,{exact:true})});
   assert.equal(await chip.getAttribute('draggable'),'true');
-  await chip.dragTo(page.locator('.mk-calendar-day').filter({has:page.locator('time[datetime="2026-11-12"]')}));
+  const target = page.locator('.mk-calendar-day').filter({has:page.locator('time[datetime="2026-11-12"]')});
+  async function dragProposal() {
+    await chip.hover();
+    await page.mouse.down();
+    try {
+      // Two movements inside the target reliably deliver native dragover.
+      // https://playwright.dev/docs/input#dragging-manually
+      await target.hover({ position: { x: 16, y: 18 } });
+      await target.hover({ position: { x: 20, y: 18 } });
+    } finally {
+      await page.mouse.up();
+    }
+  }
+  await dragProposal();
   const drawer=page.getByRole('dialog');
   const input=drawer.getByLabel('Giờ đề xuất mới · giờ Việt Nam',{exact:true});
   await input.waitFor();assert.equal(await input.inputValue(),'2026-11-12T00:30');
@@ -19,9 +32,9 @@ export async function testCalendarReschedule({page,db,base,actors,campaign,conte
   await drawer.waitFor({state:'hidden'});
   assert.equal((await db.query('select version from marketing_content_items where id=$1',[content.id])).rows[0].version,content.version);
   const foreignDrag=await page.evaluateHandle(id=>{const transfer=new DataTransfer();transfer.setData('application/x-colorme-calendar',id);return transfer;},content.id);
-  await page.locator('.mk-calendar-day').filter({has:page.locator('time[datetime="2026-11-12"]')}).dispatchEvent('drop',{dataTransfer:foreignDrag});
+  await target.dispatchEvent('drop',{dataTransfer:foreignDrag});
   assert.equal(await drawer.isVisible(),false);await foreignDrag.dispose();
-  await chip.dragTo(page.locator('.mk-calendar-day').filter({has:page.locator('time[datetime="2026-11-12"]')}));
+  await dragProposal();
   await drawer.getByRole('button',{name:'Lưu giờ đề xuất',exact:true}).click();
   await drawer.getByText('Đã lưu giờ đề xuất. Nội dung ở trạng thái Bản nháp.',{exact:true}).waitFor();
   let saved=(await db.query('select * from marketing_content_items where id=$1',[content.id])).rows[0];
