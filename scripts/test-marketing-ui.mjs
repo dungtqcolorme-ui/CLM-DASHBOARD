@@ -10,6 +10,7 @@ import {execFileSync} from 'node:child_process';
 import {resolve,extname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {routeLoader} from '../tests/helpers/load-route.mjs';
+import {MetaPageError,readMetaPagePosts} from '../lib/marketing/meta-page.mjs';
 import {creativeOsFixture} from '../tests/fixtures/creative-os.mjs';
 import {testKnowledgeWorkflow} from './marketing-knowledge-ui-checks.mjs';
 import {testCreativeWorkflow} from './marketing-creative-ui-checks.mjs';
@@ -76,6 +77,23 @@ const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
 const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
 const phase5Apis=Object.fromEntries(['video','video/source','reports','reports/export','readiness','calendar','calendar/media','tasks','notifications'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
+const metaPageId='103245086061688';
+const metaFixtureEnv={META_PAGE_ID:metaPageId,META_GRAPH_VERSION:'v24.0',META_PAGE_ACCESS_TOKEN:'fixture-meta-page-token'};
+const metaApi=routeLoader({
+ '@/lib/dashboardSession':{async getDashboardRequestIdentity(request){
+  const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));
+  if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});
+  return {profile:actor};
+ }},
+ '@/lib/marketing/meta-page.mjs':{MetaPageError,readMetaPagePosts:(_env,cursor)=>readMetaPagePosts(metaFixtureEnv,cursor,async(url)=>{
+  if(url.pathname==='/v24.0/me')return Response.json({id:metaPageId,name:'Color ME Partnership'});
+  assert.equal(url.pathname,`/v24.0/${metaPageId}/published_posts`);
+  const second=url.searchParams.get('after')==='fixture-next';
+  return Response.json({data:[{id:`${metaPageId}_${second?'2':'1'}`,created_time:'2026-11-08T10:30:00+0000',message:second?'Bài Meta trang thứ hai':'Bài Meta trang đầu'}],
+   ...(second?{}:{paging:{next:'https://graph.facebook.com/ignored?access_token=fixture-meta-page-token',cursors:{after:'fixture-next'}}})});
+ })},
+})('app/api/marketing/meta/published-posts/route.ts');
+phase5Apis['/api/marketing/meta/published-posts']=metaApi;
 const env=await readFile('.env.local','utf8');const supabaseUrl=env.match(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)?.[1];
 assert.ok(supabaseUrl,'Public Supabase URL is required for the client SDK storage key');const storageKey=`sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 const browser=await playwright.chromium.launch({headless:true,channel:process.env.CLM_QA_BROWSER||'chrome'});
@@ -220,6 +238,7 @@ try{
   const calendarDenied=await realHttp.get('/api/marketing/calendar');
   assert.equal(calendarDenied.status(),401);
   assert.match(calendarDenied.headers()['cache-control'],/no-store/);
+  assert.equal((await realHttp.get('/api/marketing/meta/published-posts')).status(),401);
  }finally{await realHttp.dispose();}
  await p.goto(base+'/marketing');
  await p.getByRole('button',{name:'Kiểm tra trạng thái',exact:true}).click();
@@ -227,6 +246,14 @@ try{
  await p.getByText(/Meta · Chưa có bộ kết nối đã xác minh/).waitFor();
  await shot(p,'marketing-readiness-phase6');
  report.checks.push('Admin readiness uses current SQL marker and reports unavailable integrations explicitly');
+ await p.getByRole('button',{name:'Kiểm tra và xem bài Meta',exact:true}).click();
+ await p.getByText('Bài Meta trang đầu',{exact:true}).waitFor();
+ await p.getByRole('button',{name:'Trang bài kế tiếp',exact:true}).click();
+ await p.getByText('Bài Meta trang thứ hai',{exact:true}).waitFor();
+ assert.equal(await p.getByRole('button',{name:'Trang bài kế tiếp',exact:true}).count(),0);
+ assert.doesNotMatch(await p.getByRole('region',{name:'Bài đã đăng trên Meta'}).innerText(),/fixture-meta-page-token/);
+ await shot(p,'marketing-meta-page-preview');
+ report.checks.push('Admin reads published Page posts with safe cursor pagination against a synthetic Meta Graph response');
  checkpoint('eight routes');
  const titles={overview:'Marketing Overview',campaigns:'Campaigns',agent:'AI Agent & Ideas',studio:'Creative Studio',calendar:'Content Calendar',assets:'Asset & Template Library',intelligence:'Intelligence & Reports',approvals:'Approval Inbox'};
  for(const [path,name] of [['','overview'],['/campaigns','campaigns'],['/agent','agent'],['/studio','studio'],['/calendar','calendar'],['/assets','assets'],['/intelligence','intelligence'],['/approvals','approvals']]){

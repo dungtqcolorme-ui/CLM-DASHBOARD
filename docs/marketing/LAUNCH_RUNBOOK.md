@@ -84,9 +84,11 @@ node --env-file=/secure/path/meta.env scripts/verify-marketing-meta-page.mjs
 
 Chọn một trong hai cách chạy. Lệnh gọi `GET /me?fields=id,name` để lấy danh tính mà token đại diện và đối chiếu ID với `META_PAGE_ID`. Khi khớp, lệnh in ID và tên Page để Admin xác nhận. Kết quả này chỉ xác minh danh tính Page. Tiếp tục xác minh quyền, Business tasks và App Review trước khi thử xuất bản. [Meta Graph API Explorer](https://developers.facebook.com/docs/graph-api/guides/explorer/)
 
+Sau khi nạp các biến trên vào runtime staging, Admin mở **Marketing Overview → Trạng thái triển khai → Kiểm tra và xem bài Meta**. Mỗi lượt xác minh Page rồi đọc tối đa 10 bài đã xuất bản bằng `published_posts`. Đối chiếu tên Page, ID, thời gian và trích đoạn với Business Suite. Bản xem trước không lưu bài vào CLM DB. Cần xác minh quyền đọc với ứng dụng thật trước khi dùng dữ liệu Page trong báo cáo. [Meta Business SDK](https://github.com/meta/facebook-nodejs-business-sdk/blob/main/src/objects/page.js)
+
 ## Tích hợp cần xử lý trước khi bật live
 
-- **Meta**. Xác minh Page theo quy trình trên, kiểm tra Business tasks và quyền, rồi hoàn thành App Review. Triển khai adapter production và quy trình quản lý token. Chạy dry run bằng test Page được phê duyệt trước khi bật live. Đối chiếu receipt, quota, lỗi timeout và quy trình hủy lịch từ Meta.
+- **Meta**. Xác minh Page theo quy trình trên, kiểm tra Business tasks và quyền, rồi hoàn thành App Review. Triển khai adapter xuất bản và quy trình quản lý token. Chạy dry run bằng test Page được phê duyệt trước khi bật live. Đối chiếu receipt, quota, lỗi timeout và quy trình hủy lịch từ Meta.
 - **Worker xuất bản**. Chọn máy chạy worker và lịch được hosting plan hỗ trợ. Bật theo feature flag sau kiểm thử lease, idempotency, reconciliation và cảnh báo. Chỉ phê duyệt và lên lịch từng snapshot bằng Leader/Admin khác Creator.
 - **Google Drive**. Tạo OAuth riêng cho phạm vi Drive tối thiểu. Admin xác nhận folder whitelist, cấp quyền theo Campaign và thử revoke/moved file. Quyền đọc Drive và quyền xuất bản asset được xét riêng.
 - **Video**. Chọn renderer và môi trường worker sau kiểm tra license, chi phí, giới hạn CPU/memory/timeout/concurrency. Chứng minh worker tạo artifact thật và lưu digest/receipt cho đúng version. Tích hợp STT từ âm thanh thật cần cấu hình riêng.
