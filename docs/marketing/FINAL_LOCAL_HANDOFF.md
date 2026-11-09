@@ -35,15 +35,16 @@ CLM_MARKETING_QA_URL=http://127.0.0.1:3104 \
 
 ## Kết quả nghiệm thu
 
-- `pnpm verify` đạt lint, TypeScript, 208 kiểm thử unit/API, hồi quy Dashboard và build production.
+- `pnpm verify` đạt lint, TypeScript, 209 kiểm thử unit/API, hồi quy Dashboard và build production.
 - PostgreSQL tạm đạt 10 bộ SQL và 13 lượt kiểm tra parser qua RPC. Các bộ kiểm thử nạp đủ mười migration Marketing.
-- Chrome đạt 35 kiểm tra và ghi nhận một lượt tải iframe Dashboard cũ. Báo cáo `tmp/marketing/qa-report.json` có danh sách kiểm tra và đường dẫn ảnh.
+- Chrome đạt 36 kiểm tra và ghi nhận một lượt tải iframe Dashboard cũ. Báo cáo `tmp/marketing/qa-report.json` có danh sách kiểm tra và đường dẫn ảnh.
+- `pnpm test:marketing:staging` đã qua 15 bước đối chiếu với API và RLS local. Fixture xác nhận lệnh phát hiện bucket công khai và quyền đọc Storage quá rộng cho cả tài khoản đã đăng nhập lẫn anon. Nghiệm thu trên dịch vụ thật cần môi trường staging.
 - Kiểm thử xác nhận người nhận có thể đọc phiên bản đã gửi dù nội dung đã thay đổi, quyền gỡ khỏi team chặn thông báo cũ, và mẫu Paid mới hơn ở độ chính xác micro giây loại mẫu Organic cũ.
 - Rà soát độc lập đã kiểm tra lại các sửa đổi về phiên bản niêm phong, quyền đọc lịch sử và thứ tự mẫu. Dữ liệu chứng minh ở đây thuộc môi trường local với danh tính và Storage giả lập.
 
 ## Điều kiện để chốt bản production
 
-1. Chỉ định Supabase và URL staging tách biệt. Ngày 09/11/2026, danh sách dự án được kết nối có CLM DASHBOARD và kết quả liệt kê nhánh phát triển của dự án này trống. Áp dụng mười migration theo thứ tự trong runbook. Nghiệm thu đăng nhập thật, RLS, Storage, tải và rollback.
+1. Chỉ định Supabase và URL staging tách biệt. Ngày 09/11/2026, danh sách dự án được kết nối có CLM DASHBOARD và kết quả liệt kê nhánh phát triển của dự án này trống. Áp dụng mười migration theo thứ tự trong runbook. Chạy lệnh kiểm tra chỉ đọc trong runbook, sau đó nghiệm thu đăng nhập thật, RLS, Storage, tải và rollback.
 2. Xác minh Page Partnership, quyền Meta và nguồn Organic trên tài khoản được duyệt. Hoàn thiện adapter, scheduler, biên nhận thật và Audience Listening trước khi bật xuất bản. Admin xác nhận vận hành theo runbook.
 3. Cấp cấu hình Drive và thư mục được phép. Chọn môi trường render và STT nếu dùng video tự động. Chọn provider cho AI trong ứng dụng nếu cần. Chat Codex riêng tiếp tục dùng liên kết ngữ cảnh đã ghi trong [CHAT_LINK.md](CHAT_LINK.md).
 4. Xác nhận báo cáo staging và lịch mở pilot. Mục chưa nghiệm thu hoặc còn phần triển khai được ghi theo tính năng trong [FEATURE_READINESS.md](FEATURE_READINESS.md).

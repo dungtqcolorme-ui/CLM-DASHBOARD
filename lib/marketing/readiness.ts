@@ -7,7 +7,19 @@ const missingSchema = new Set(["42P01", "42883", "PGRST202", "PGRST205"]);
 
 type Environment = Record<string, string | undefined>;
 
-export async function readMarketingReadiness(client: SupabaseClient, env: Environment = process.env) {
+function deploymentIdentity(env: Environment, databaseUrl?: string) {
+  const revision = env.VERCEL_GIT_COMMIT_SHA || env.CLM_RELEASE_SHA;
+  const environment = env.VERCEL_ENV || env.CLM_DEPLOYMENT_ENV;
+  const databaseProjectRef = databaseUrl?.trim().match(/^https:\/\/([a-z0-9]{20})\.supabase\.co\/?$/)?.[1] ?? null;
+  return {
+    revision: revision && /^[0-9a-f]{40}$/.test(revision) ? revision : null,
+    environment: environment && ["preview", "production", "development", "staging"].includes(environment)
+      ? environment : null,
+    databaseProjectRef,
+  };
+}
+
+export async function readMarketingReadiness(client: SupabaseClient, env: Environment = process.env, databaseUrl?: string) {
   const { data, error } = await client.rpc("marketing_readiness_probe");
   if (error && !missingSchema.has(error.code)) databaseError(error);
 
@@ -16,6 +28,7 @@ export async function readMarketingReadiness(client: SupabaseClient, env: Enviro
     schema: error ? "missing" : data === schemaVersion ? "current" : "unexpected",
     expectedMigration: schemaVersion,
     liveMetaRequested: env.LIVE_META_PUBLISH_ENABLED === "true",
+    deployment: deploymentIdentity(env, databaseUrl),
     integrations: {
       meta: {
         status: "adapter_unavailable",

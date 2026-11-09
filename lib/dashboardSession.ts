@@ -27,8 +27,12 @@ type ProfileRow = {
   avatar_path: string;
 };
 
+export function dashboardSupabaseUrl() {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL;
+}
+
 export function createDashboardUserClient(token: string) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseUrl = dashboardSupabaseUrl();
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Thiếu cấu hình Supabase công khai.");

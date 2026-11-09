@@ -19,6 +19,33 @@ Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration �
 
 Đặt `LIVE_META_PUBLISH_ENABLED` ở `false` trên staging. Admin mở **Marketing Overview → Trạng thái triển khai → Kiểm tra trạng thái**. Kết quả xác nhận schema và liệt kê phần thiếu theo tên cấu hình. Các tích hợp cần xác minh riêng ngay cả khi schema hiện hành. Quản lý secrets trong môi trường deploy hoặc secret manager của dự án.
 
+## Kiểm tra chỉ đọc trên staging
+
+Chạy từ checkout đúng commit đã deploy. Trên Vercel, sử dụng Preview có biến hệ thống `VERCEL_ENV` và `VERCEL_GIT_COMMIT_SHA`. Với hosting khác, đặt `CLM_DEPLOYMENT_ENV=staging` và `CLM_RELEASE_SHA` ở runtime từ phiên bản đã build. Trang trạng thái Marketing của Admin hiển thị ba giá trị để đối chiếu. [Biến hệ thống Vercel](https://vercel.com/docs/environment-variables/system-environment-variables)
+
+Chuẩn bị hai team thử A và B. Mỗi team có membership, Campaign, một bài có lịch sử phiên bản và một ảnh PNG/JPEG riêng tư còn hiệu lực. Admin xem được cả hai team. Mỗi tài khoản PR Leader, PR Representative và Viewer thử có một vai trò và membership team A.
+
+| Biến | Giá trị |
+|---|---|
+| `CLM_STAGING_URL` | Origin HTTPS của Preview staging |
+| `CLM_STAGING_SUPABASE_REF`, `CLM_PRODUCTION_SUPABASE_REF` | Hai project ref khác nhau, dùng URL Supabase chuẩn theo project |
+| `CLM_STAGING_STORAGE_PUBLISHABLE_KEY` | Publishable key dạng `sb_publishable_…` của staging để kiểm tra Storage trực tiếp |
+| `CLM_STAGING_RELEASE_SHA` | SHA Git đầy đủ 40 ký tự của bản đang nghiệm thu |
+| `CLM_STAGING_TEAM_ID`, `CLM_STAGING_OTHER_TEAM_ID` | UUID team A và B |
+| `CLM_STAGING_ASSET_ID`, `CLM_STAGING_OTHER_ASSET_ID` | UUID ảnh thử tương ứng trong team A và B |
+| `CLM_STAGING_ADMIN_TOKEN`, `CLM_STAGING_LEADER_TOKEN`, `CLM_STAGING_REPRESENTATIVE_TOKEN`, `CLM_STAGING_VIEWER_TOKEN` | Access token Supabase Auth của bốn tài khoản staging, còn hạn ít nhất năm phút |
+
+Với Preview dùng Deployment Protection, nạp `CLM_STAGING_VERCEL_BYPASS_SECRET` nếu dự án đã cấp Protection Bypass for Automation. Lệnh gửi giá trị qua header trên origin staging đã chọn. [Vercel Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)
+
+Nạp token qua kho bí mật hoặc file env cục bộ có quyền truy cập giới hạn nằm ngoài repo. Dùng một trong hai cách chạy sau.
+
+```sh
+pnpm test:marketing:staging
+node --env-file=/secure/path/staging.env scripts/test-marketing-staging.mjs
+```
+
+Lệnh chạy các GET có timeout, kiểm tra deployment trước khi đọc workspace theo vai trò, và dừng ở lỗi đầu tiên. Phần ảnh kiểm tra cả API ứng dụng lẫn endpoint Storage trực tiếp theo JWT, quyền của vai trò anon và URL public của bucket. [Supabase Storage downloads](https://supabase.com/docs/guides/storage/serving/downloads) Kết quả gồm trạng thái, tên kiểm tra, SHA và migration. Phiên dùng định dạng issuer chuẩn của Supabase Auth, còn ứng dụng xác minh chữ ký và quyền tài khoản. Tiếp tục nghiệm thu quy trình ghi dữ liệu, cạnh tranh giao dịch và tích hợp theo bảng bên dưới. [Supabase JWT claims](https://supabase.com/docs/guides/auth/jwt-fields)
+
 ## Tiêu chí nghiệm thu staging
 
 | Luồng | Bằng chứng cần ghi |

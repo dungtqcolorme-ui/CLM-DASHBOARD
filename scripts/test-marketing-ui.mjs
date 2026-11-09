@@ -17,6 +17,7 @@ import {testPublishingWorkflow} from './marketing-publishing-ui-checks.mjs';
 import {testTaskLinksWorkflow} from './marketing-task-links-ui-checks.mjs';
 import {testCalendarPublication} from './marketing-calendar-ui-checks.mjs';
 import {testCalendarReschedule} from './marketing-calendar-schedule-ui-checks.mjs';
+import {testStagingAcceptance} from './marketing-staging-fixture.mjs';
 import {testMarketingNotifications} from './marketing-notification-ui-checks.mjs';
 import {testKpiRevisionWorkflow} from './marketing-kpi-ui-checks.mjs';
 import {testVideoReportsWorkflow} from './marketing-video-reports-ui-checks.mjs';
@@ -69,7 +70,7 @@ function clientFor(actor){return {
  storage:{from(bucket){assert.ok(['marketing-originals','marketing-footage'].includes(bucket));return {async upload(path,bytes,options){assert.equal(options.upsert,false);try{await asActor(actor,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',[bucket,path,JSON.stringify({size:bytes.length,mimetype:options.contentType})]);storedBytes.set(path,Buffer.from(bytes));return {data:{path},error:null};}catch(error){return {data:null,error};}},async createSignedUrl(path,ttl){assert.equal(ttl,60);assert.equal(bucket,'marketing-footage');try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);if(!rows.rows.length||!storedBytes.has(path))throw Error('Private footage unavailable');const token=randomUUID();signedFootage.set(token,{actor,path,expires:Date.now()+ttl*1000});return {data:{signedUrl:base+'/qa-footage/'+token},error:null};}catch(error){return {data:null,error};}},async download(path){try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);const bytes=rows.rows.length?storedBytes.get(path):null;if(!bytes)throw new Error('Private object unavailable');return {data:new Blob([bytes]),error:null};}catch(error){return {data:null,error};}}};}},
  async rpc(name,args){if(name==='marketing_mark_notification_read'){try{const result=await asActor(actor,'select public.marketing_mark_notification_read($1::uuid) as value',[args.p_id]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}if(['marketing_readiness_probe','marketing_reserve_report_export','marketing_reserve_calendar_thumbnail'].includes(name)){try{const result=await asActor(actor,`select public.${name}() as value`);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}assert.ok(['marketing_command','marketing_task_command','marketing_campaign_kpi_command','marketing_knowledge_command','marketing_creative_command','marketing_publishing_command','marketing_video_command','marketing_report_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
 };}
-const load=routeLoader({'@/lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'marketing_publishing_gateway_command');try{return {data:await serviceCommand(args.p_command),error:null};}catch(error){return {data:null,error};}}})},'@/lib/dashboardSession':{getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
+const load=routeLoader({'@/lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'marketing_publishing_gateway_command');try{return {data:await serviceCommand(args.p_command),error:null};}catch(error){return {data:null,error};}}})},'@/lib/dashboardSession':{dashboardSupabaseUrl:()=>process.env.NEXT_PUBLIC_SUPABASE_URL,getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
 const api=load('app/api/marketing/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
@@ -208,6 +209,8 @@ try{
  await testTaskLinksWorkflow({page:p,db,base,actors,team,campaign,mainCommand:cmd,context,shot,report});
  checkpoint('Recipient notifications');lastPage=p;
  await testMarketingNotifications({page:p,db,base,actors,campaign,mainCommand:cmd,context,tokenFor,shot,report});
+ checkpoint('Staging acceptance runner');
+ await testStagingAcceptance({db,team,actors,tokens,storedBytes,clientFor,routes:{'/api/marketing':api,...creativeApis,...phase5Apis},report});
  checkpoint('Phase6 Admin readiness');
  const realHttp=await playwright.request.newContext({baseURL:base});
  try{

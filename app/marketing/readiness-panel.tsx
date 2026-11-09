@@ -41,11 +41,16 @@ export function ReadinessPanel() {
   }
 
   return <Panel title="Trạng thái triển khai · Admin">
-    <p className="mk-muted">Kiểm tra migration và các mục cấu hình cần thiết cho tích hợp.</p>
+    <p className="mk-muted">Đối chiếu deployment, migration và các mục cấu hình cần thiết cho tích hợp.</p>
     <button disabled={pending} onClick={() => void check()}>{pending ? "Đang kiểm tra…" : "Kiểm tra trạng thái"}</button>
     {error && <p role="alert">{error}</p>}
     {result && <div role="status" className="mk-stack">
       <p>{result.schema === "current" ? "Đã nhận diện migration Marketing" : "Cần kiểm tra migration Marketing"} · {result.expectedMigration}</p>
+      <p className="mk-muted">
+        Môi trường {result.deployment?.environment ?? "chưa xác định"}
+        {" · "}Commit {result.deployment?.revision ?? "chưa xác định"}
+        {" · "}Supabase {result.deployment?.databaseProjectRef ?? "chưa xác định"}
+      </p>
       {result.liveMetaRequested && <p className="mk-notice">Đã đặt cờ Meta live. Bộ kết nối đã xác minh vẫn cần được cấu hình.</p>}
       <ul>{(Object.keys(labels) as Array<keyof typeof labels>).map((key) => <li key={key}>
         {labels[key]}

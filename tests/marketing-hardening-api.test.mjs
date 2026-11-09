@@ -6,6 +6,7 @@ function readinessFixture(roles, result) {
   let probes = 0;
   const load = routeLoader({
     '@/lib/dashboardSession': {
+      dashboardSupabaseUrl: () => undefined,
       async getDashboardRequestIdentity(request) {
         if (request.headers.get('authorization') !== 'Bearer fixture') {
           throw Object.assign(new Error('Authentication failed'), { status: 401 });
@@ -71,4 +72,24 @@ test('Database operation budgets return a redacted 429 response', async () => {
   const response = marketingErrorResponse(failure);
   assert.equal(response.status, 429);
   assert.equal((await response.json()).code, 'rate_limited');
+});
+
+test('Deployment diagnostics prefer hosting identity and omit malformed metadata', async () => {
+  const { load } = readinessFixture(['Admin'], {});
+  const { readMarketingReadiness } = load('lib/marketing/readiness.ts');
+  const client = { rpc: async () => ({ data: '20261109000100' }) };
+  const result = await readMarketingReadiness(client, {
+    VERCEL_ENV: 'production', CLM_DEPLOYMENT_ENV: 'staging',
+    VERCEL_GIT_COMMIT_SHA: 'a'.repeat(40), CLM_RELEASE_SHA: 'b'.repeat(40),
+    NEXT_PUBLIC_SUPABASE_URL: 'https://' + 'p'.repeat(20) + '.supabase.co',
+  }, 'https://' + 's'.repeat(20) + '.supabase.co');
+  assert.deepEqual(result.deployment, {
+    environment: 'production', revision: 'a'.repeat(40), databaseProjectRef: 's'.repeat(20),
+  });
+  const invalid = await readMarketingReadiness(client, {
+    CLM_DEPLOYMENT_ENV: 'fixture-private-value',
+    CLM_RELEASE_SHA: 'fixture-private-value',
+  }, 'https://fixture-private-value@example.test/');
+  assert.deepEqual(invalid.deployment, { environment: null, revision: null, databaseProjectRef: null });
+  assert.doesNotMatch(JSON.stringify(invalid), /fixture-private-value/);
 });
