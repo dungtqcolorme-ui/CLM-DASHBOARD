@@ -96,7 +96,7 @@ export function SourcesPanel({ sources, teamId, campaignId, userId, canWrite, ma
     const element = event.currentTarget;
     const form = new FormData(element);
     const file = form.get("file");
-    if (!(file instanceof File)) return;
+    if (!file || typeof file === "string") return;
     void op.run(async () => {
       const assertCurrent = api.capture();
       const metadata = await fileMetadata(file);
@@ -109,7 +109,7 @@ export function SourcesPanel({ sources, teamId, campaignId, userId, canWrite, ma
         title: form.get("title"), provenance: form.get("provenance"), author: form.get("author"), ...metadata,
       }));
       update(source);
-      const uploadFile = file.type === source.mime_type ? file : new File([file], file.name, { type: source.mime_type });
+      const uploadFile = new File([file], file.name, { type: source.mime_type });
       const { error } = await getSupabaseClient().storage.from("marketing-footage").upload(source.storage_path, uploadFile, { upsert: false, contentType: source.mime_type });
       assertCurrent();
       if (error && !existing) throw Error("Chưa tải được tệp. Chọn lại cùng tệp để thử tiếp.");

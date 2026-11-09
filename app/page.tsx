@@ -1,11 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-import { isMarketingPath } from "@/lib/marketing/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
+import { dashboardPage, isMarketingPath } from "@/lib/marketing/navigation";
 import { ColoroLoading } from "./ColoroLoading";
+import { DashboardOutlet } from "./dashboard-outlet";
 import { createDashboardBootstrap, loadBootstrapState } from "@/lib/dashboardBootstrap.mjs";
-import { FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AppRole, type AuthProfile, dashboardRole } from "@/lib/authTypes";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
@@ -19,7 +21,7 @@ const CACHE_TIMEOUT_MS = 3_000;
 const DASHBOARD_BOOT_TIMEOUT_MS = 40_000;
 const STATE_DOWNLOAD_TIMEOUT_MS = 30_000;
 const PROFILE_CACHE_TTL_MS = 5 * 60_000;
-const LEGACY_PAGES = ["doingoai", "truyenthong", "anpham", "hocbong", "baocao", "phoihop", "tailieu", "taikhoan"];
+const roleKey = (userId: string) => `clm-dashboard-role:${userId}`;
 
 type DashboardRpcMessage = {
   type: "clm-dashboard-rpc";
@@ -76,7 +78,8 @@ type DashboardRpcMessage = {
 };
 
 type DashboardBridgeWindow = Window & {
-  go?: (page: string) => void;
+  clmMarketingNavigation?: { setPath: (path: string | null) => void };
+  clmShowLegacyPage?: (page: string | null) => void;
   __clmDashboardMessage?: (message: unknown) => void;
   __clmDashboardRpcResult?: (message: unknown) => void;
   __CLM_BOOTSTRAP_PROFILE__?: Partial<AuthProfile>;
@@ -251,12 +254,16 @@ function Icon({ name }: { name: "mail" | "lock" | "eye" | "eyeOff" | "calendar" 
 
 export default function Home() {
   const router = useRouter();
+  const pathname = usePathname();
+  const legacyPage = dashboardPage(useSearchParams().get("legacy"));
+  const marketingOutlet = useContext(DashboardOutlet);
   const [dashboardUrl, setDashboardUrl] = useState("");
   const [dashboardFrameKey, setDashboardFrameKey] = useState(0);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardReady, setDashboardReady] = useState(false);
+  const [marketingMount, setMarketingMount] = useState<HTMLElement | null>(null);
   const [loadingSuccess, setLoadingSuccess] = useState(false);
   const [dashboardBootError, setDashboardBootError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -309,7 +316,10 @@ export default function Home() {
     profileRequestAbortRef.current = controller;
     const request = authorizedApi<{ profile: AuthProfile }>(endpoint, {
       signal: controller.signal,
-    }).then(({ profile: nextProfile }) => cacheProfile(nextProfile));
+    }).then(({ profile: nextProfile }) => {
+      if (controller.signal.aborted) throw new DOMException("Phiên đăng nhập đã thay đổi.", "AbortError");
+      return cacheProfile(nextProfile);
+    });
     profileRequestRef.current = request;
     try {
       return await request;
@@ -355,14 +365,17 @@ export default function Home() {
     consumedBootKeyRef.current = activeBootKeyRef.current;
     seedProfileFromDashboardBootstrap();
     bootstrapStateRef.current?.clear();
+    setMarketingMount(frame.contentDocument.getElementById("clm-marketing-content"));
     setDashboardReady(true); setDashboardLoading(false); setDashboardBootError("");
     setLoadingSuccess(true);
-    const legacyPage = new URLSearchParams(window.location.search).get("legacy");
-    if (legacyPage && LEGACY_PAGES.includes(legacyPage)) {
-      const frameWindow = frame.contentWindow as DashboardBridgeWindow | null;
-      frameWindow?.go?.(legacyPage);
-    }
   }, [seedProfileFromDashboardBootstrap]);
+
+  useLayoutEffect(() => {
+    if (!dashboardReady) return;
+    const frame = dashboardFrameRef.current?.contentWindow as DashboardBridgeWindow | null;
+    frame?.clmMarketingNavigation?.setPath(isMarketingPath(pathname) ? pathname : null);
+    if (pathname === "/") frame?.clmShowLegacyPage?.(legacyPage);
+  }, [dashboardReady, marketingMount, pathname, legacyPage]);
 
   const openPrivateDashboard = useCallback(async (role: AppRole) => {
     if (!mountedRef.current) return;
@@ -402,9 +415,11 @@ export default function Home() {
     const currentProfile = profileRef.current;
     if (!currentProfile?.roles.includes(role)) throw new Error("Vai trò không thuộc tài khoản này.");
     setDashboardReady(false);
+    setMarketingMount(null);
     setDashboardLoading(true);
     setDashboardBootError("");
     activeRoleRef.current = role;
+    try { sessionStorage.setItem(roleKey(currentProfile.id), role); } catch { /* Storage is optional. */ }
     setActiveRole(role);
     setError("");
     try {
@@ -554,11 +569,12 @@ export default function Home() {
       return { profile: nextProfile };
     }
     if (message.action === "update-account-profile") {
+      const generation = bootGenerationRef.current;
       const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
         method: "PATCH",
         body: JSON.stringify(payload),
       }, requestRole);
-      cacheProfile(result.profile);
+      if (generation === bootGenerationRef.current && profileRef.current?.id === result.profile.id) cacheProfile(result.profile);
       return result;
     }
     if (message.action === "change-password") {
@@ -568,6 +584,7 @@ export default function Home() {
       }, requestRole);
     }
     if (message.action === "upload-avatar") {
+      const generation = bootGenerationRef.current;
       const file = payload.file;
       if (!(file instanceof Blob)) throw new Error("Không nhận được ảnh đại diện.");
       const form = new FormData();
@@ -576,14 +593,15 @@ export default function Home() {
         method: "PUT",
         body: form,
       }, requestRole);
-      cacheProfile(result.profile);
+      if (generation === bootGenerationRef.current && profileRef.current?.id === result.profile.id) cacheProfile(result.profile);
       return result;
     }
     if (message.action === "delete-avatar") {
+      const generation = bootGenerationRef.current;
       const result = await authorizedApi<{ profile: AuthProfile }>("/api/account/profile", {
         method: "DELETE",
       }, requestRole);
-      cacheProfile(result.profile);
+      if (generation === bootGenerationRef.current && profileRef.current?.id === result.profile.id) cacheProfile(result.profile);
       return result;
     }
     if (message.action === "cancel-profile-request") {
@@ -798,8 +816,8 @@ export default function Home() {
     return { deleted: true };
   }, [cacheProfile, loadCurrentProfile]);
 
-  const logout = useCallback(async () => {
-    const supabase = getSupabaseClient();
+  const clearDashboardSession = useCallback(() => {
+    try { if (profileRef.current) sessionStorage.removeItem(roleKey(profileRef.current.id)); } catch { /* Storage is optional. */ }
     profileRequestAbortRef.current?.abort();
     profileRequestAbortRef.current = null;
     profileRequestRef.current = null;
@@ -807,9 +825,8 @@ export default function Home() {
     appLoadIdRef.current = "";
     cancelDashboardBootstrap();
     setLoadingSuccess(false);
-    void fetch("/api/dashboard/session", { method: "DELETE" }).catch(() => undefined);
-    await supabase.auth.signOut();
     setDashboardUrl("");
+    setMarketingMount(null);
     profileRef.current = null;
     activeRoleRef.current = "";
     setProfile(null);
@@ -818,6 +835,12 @@ export default function Home() {
     setDashboardReady(false);
     setDashboardBootError("");
     setPassword("");
+  }, [cancelDashboardBootstrap]);
+
+  const logout = useCallback(async () => {
+    clearDashboardSession();
+    void fetch("/api/dashboard/session", { method: "DELETE" }).catch(() => undefined);
+    await getSupabaseClient().auth.signOut();
     setError("");
     if ("caches" in window) {
       void withTimeout(
@@ -826,7 +849,7 @@ export default function Home() {
         "Không thể xóa bộ nhớ đệm.",
       ).catch(() => undefined);
     }
-  }, [cancelDashboardBootstrap]);
+  }, [clearDashboardSession]);
 
   useEffect(() => {
     if (!dashboardLoading || dashboardReady || dashboardBootError) return;
@@ -868,8 +891,13 @@ export default function Home() {
             const currentProfile = await loadCurrentProfile();
             if (!active) return;
             const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-            if (isMarketingPath(returnTo)) { router.replace(returnTo); return; }
-            if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
+            if (isMarketingPath(returnTo)) router.replace(returnTo);
+            let savedRole: string | null = null;
+            if (isMarketingPath(returnTo) || isMarketingPath(window.location.pathname)) {
+              try { savedRole = sessionStorage.getItem(roleKey(currentProfile.id)); } catch { /* Storage is optional. */ }
+            }
+            const role = currentProfile.roles.length === 1 ? currentProfile.roles[0] : currentProfile.roles.find((entry) => entry === savedRole);
+            if (role) await enterDashboard(role);
           } catch (sessionError) {
             if (!active || isAbortError(sessionError)) return;
             await supabase.auth.signOut();
@@ -885,14 +913,7 @@ export default function Home() {
       });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT" && active) {
-        cancelDashboardBootstrap();
-        setLoadingSuccess(false);
-        setDashboardUrl("");
-        setDashboardLoading(false);
-        setDashboardReady(false);
-        setDashboardBootError("");
-      }
+      if (event === "SIGNED_OUT" && active) clearDashboardSession();
     });
 
     const sendRpcResult = (message: Record<string, unknown>) => {
@@ -913,7 +934,25 @@ export default function Home() {
       if (!payload || typeof payload !== "object") return;
       const data = payload as Record<string, unknown>;
       if (data.type === "clm-marketing-open") {
-        if (isMarketingPath(data.path)) router.push(data.path);
+        if (isMarketingPath(data.path)) {
+          const previousPage = dashboardPage(data.legacyPage);
+          if (window.location.pathname === "/") {
+            const url = new URL(window.location.href);
+            if (previousPage) url.searchParams.set("legacy", previousPage);
+            else url.searchParams.delete("legacy");
+            if (url.href !== window.location.href) window.history.replaceState(null, "", url);
+          }
+          const target = new URL(data.path, window.location.origin);
+          let campaign: string | null = null;
+          try { campaign = sessionStorage.getItem("clm-marketing-campaign"); } catch { /* Storage is optional. */ }
+          if (campaign && /^[0-9a-f-]{36}$/i.test(campaign) && !target.searchParams.has("campaign")) target.searchParams.set("campaign", campaign);
+          if (target.href !== window.location.href) router.push(target.pathname + target.search + target.hash);
+        }
+        return;
+      }
+      if (data.type === "clm-legacy-open" && isMarketingPath(window.location.pathname)) {
+        const page = dashboardPage(data.page);
+        if (page || data.page === null) router.push(page ? `/?legacy=${page}` : "/");
         return;
       }
       if (data.type === "clm-dashboard-logout") {
@@ -932,9 +971,13 @@ export default function Home() {
       }
       if (data.type !== "clm-dashboard-rpc") return;
       const message = data as DashboardRpcMessage;
+      const frame = dashboardFrameRef.current?.contentDocument;
+      const reply = (result: Record<string, unknown>) => {
+        if (frame && frame === dashboardFrameRef.current?.contentDocument) sendRpcResult(result);
+      };
       void runDashboardRpc(message)
-        .then((result) => sendRpcResult({ type: "clm-dashboard-rpc-result", id: message.id, ok: true, data: result }))
-        .catch((rpcError) => sendRpcResult({
+        .then((result) => reply({ type: "clm-dashboard-rpc-result", id: message.id, ok: true, data: result }))
+        .catch((rpcError) => reply({
           type: "clm-dashboard-rpc-result",
           id: message.id,
           ok: false,
@@ -955,17 +998,10 @@ export default function Home() {
 
     const handleDashboardMessage = (event: MessageEvent) => {
       if (event.source !== dashboardFrameRef.current?.contentWindow) return;
-      if (event.data?.type === "clm-marketing-open" && event.origin !== window.location.origin) return;
+      if (["clm-marketing-open", "clm-legacy-open"].includes(event.data?.type) && event.origin !== window.location.origin) return;
       handleDashboardPayload(event.data);
     };
     window.addEventListener("message", handleDashboardMessage);
-    const resumeLegacy = () => {
-      const legacyPage = new URLSearchParams(window.location.search).get("legacy");
-      if (legacyPage && LEGACY_PAGES.includes(legacyPage)) {
-        (dashboardFrameRef.current?.contentWindow as DashboardBridgeWindow | null)?.go?.(legacyPage);
-      }
-    };
-    window.addEventListener("clm-legacy-resume", resumeLegacy);
 
     return () => {
       active = false; mountedRef.current = false;
@@ -973,12 +1009,11 @@ export default function Home() {
       if (hostWindow.__clmReadDashboardState__ === readBootstrapState) delete hostWindow.__clmReadDashboardState__;
       authListener.subscription.unsubscribe();
       window.removeEventListener("message", handleDashboardMessage);
-      window.removeEventListener("clm-legacy-resume", resumeLegacy);
       if (hostWindow.__clmDashboardMessage === directBridge) {
         delete hostWindow.__clmDashboardMessage;
       }
     };
-  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, markDashboardReady, cancelDashboardBootstrap, router]);
+  }, [enterDashboard, loadCurrentProfile, logout, runDashboardRpc, markDashboardReady, cancelDashboardBootstrap, clearDashboardSession, router]);
 
   useEffect(() => {
     if (!loadingSuccess) return;
@@ -997,7 +1032,7 @@ export default function Home() {
       if (loginError || !loginData.user) throw new Error("Email hoặc mật khẩu không đúng.");
       const currentProfile = await loadCurrentProfile();
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      if (isMarketingPath(returnTo)) { router.replace(returnTo); return; }
+      if (isMarketingPath(returnTo)) router.replace(returnTo);
       if (currentProfile.roles.length === 1) await enterDashboard(currentProfile.roles[0]);
     } catch (loginError) {
       await getSupabaseClient().auth.signOut();
@@ -1037,6 +1072,8 @@ export default function Home() {
             allow="clipboard-read; clipboard-write"
           />
         )}
+        {dashboardReady && marketingOutlet && marketingMount && createPortal(marketingOutlet, marketingMount)}
+        {dashboardReady && marketingOutlet && !marketingMount && <DashboardLoading error="Phiên bản Dashboard này chưa có vùng nội dung Marketing." onRetry={() => void retryDashboard()} />}
         {(!dashboardReady || dashboardLoading || dashboardBootError || loadingSuccess) && (
           <DashboardLoading success={loadingSuccess} error={dashboardBootError} onRetry={() => void retryDashboard()} />
         )}

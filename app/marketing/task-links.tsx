@@ -43,7 +43,7 @@ function TaskLinkPanel({ item }: { item: MarketingContent }) {
     }, "Đã liên kết Task.");
   }
   const links = control.data?.links ?? [];
-  return <Panel title="Task của nội dung" action={writable && <Link className="mk-button" href="/?legacy=phoihop" target={workspace.embedded ? "_top" : undefined}>
+  return <Panel title="Task của nội dung" action={writable && <Link className="mk-button" href="/?legacy=phoihop">
     Tạo Task trong Task hàng ngày
   </Link>}>
     <p className="mk-muted">Gắn mã Task đang có vào nội dung. Trạng thái Task và bước duyệt nội dung được theo dõi riêng.</p>

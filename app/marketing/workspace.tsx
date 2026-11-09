@@ -1,24 +1,22 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import type { MarketingCommand, MarketingWorkspace } from "@/lib/marketing/types";
-import { MARKETING_NAV, isMarketingActive } from "@/lib/marketing/navigation";
+import { ColoroLoading } from "../ColoroLoading";
 import { reconcileCampaignNavigation } from "./campaign-context";
 import { clearSceneDrafts } from "./creative/draft-state";
 import { phaseFiveScope } from "./video/access-scope";
 import { phaseFiveDraftCache } from "./video/draft-access";
 
-const legacy = [["doingoai", "Đối ngoại"], ["truyenthong", "Truyền thông"], ["anpham", "Ấn phẩm"], ["hocbong", "Học bổng"], ["baocao", "Hiệu suất"], ["phoihop", "Task hàng ngày"], ["tailieu", "Tài liệu"]];
 export class MarketingError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 type WorkspaceContext = {
   data: MarketingWorkspace; refresh: () => Promise<void>;
   command: <T = Record<string, unknown>>(command: MarketingCommand) => Promise<T>;
-  selected: string; select: (id: string) => void; embedded: boolean;
+  selected: string; select: (id: string) => void;
   canWrite: boolean; manager: boolean; admin: boolean; phaseFiveAccessVersion: number;
   invalidateAccess: (message: string, status: number) => void; href: (path: string) => string;
 };
@@ -30,8 +28,8 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
   const synchronizedNavigation = useRef("");
   const [data, setData] = useState<MarketingWorkspace | null>(null);
   const [error, setError] = useState(""); const [unauthorized, setUnauthorized] = useState(false);
-  const [loading, setLoading] = useState(true); const [embedded, setEmbedded] = useState(true);
-  const [selected, setSelected] = useState(""); const [open, setOpen] = useState(true); const [mobile, setMobile] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState("");
   const authGeneration = useRef(0);
   const workspaceIdentity = useRef<string | null>(null);
   const [phaseFiveAccessVersion, setPhaseFiveAccessVersion] = useState(0);
@@ -49,17 +47,15 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
     setData(body); setError(""); setUnauthorized(false);
   }, [invalidate]);
   const load = useCallback(async () => { setLoading(true); try { await refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Không thể tải dữ liệu."); setUnauthorized(e instanceof MarketingError && e.status === 401); } finally { setLoading(false); } }, [refresh]);
-  // Browser frame and storage state are unavailable during server rendering.
+  // Session storage is unavailable during server rendering.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setEmbedded(new URLSearchParams(window.location.search).get("embedded") === "1" || window.parent !== window);
     try { setSelected(sessionStorage.getItem("clm-marketing-campaign") || ""); } catch { /* Storage may be unavailable in private contexts. */ }
     void load();
     let unsubscribe: (() => void) | undefined;
     try { const { data: listener } = getSupabaseClient().auth.onAuthStateChange((event, session) => { if (event === "SIGNED_OUT") invalidate("Phiên đăng nhập đã kết thúc.", 401); else if (session && workspaceIdentity.current && session.user.id !== workspaceIdentity.current) invalidate("Phiên đăng nhập đã thay đổi.", 401); }); unsubscribe = () => listener.subscription.unsubscribe(); } catch { /* load reports environment configuration failures. */ }
     return () => unsubscribe?.();
   }, [load, invalidate]);
-  useEffect(() => { setOpen(true); setMobile(false); }, [pathname]);
   const select = useCallback((id: string) => { setSelected(id); try { sessionStorage.setItem("clm-marketing-campaign", id); } catch { /* Selection remains available in memory. */ } }, []);
   useEffect(() => {
     if (!data) return;
@@ -68,7 +64,7 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
     if (next.selection !== undefined) select(next.selection);
   }, [data, pathname, search, select]);
   /* eslint-enable react-hooks/set-state-in-effect */
-  const href = (path: string) => { const [base, query = ""] = path.split("?"); const params = new URLSearchParams(query); if (embedded) params.set("embedded", "1"); if (selected && data?.campaigns.some((c) => c.id === selected) && !params.has("campaign")) params.set("campaign", selected); return `${base}${params.size ? `?${params}` : ""}`; };
+  const href = (path: string) => { const [base, query = ""] = path.split("?"); const params = new URLSearchParams(query); if (selected && data?.campaigns.some((c) => c.id === selected) && !params.has("campaign")) params.set("campaign", selected); return `${base}${params.size ? `?${params}` : ""}`; };
   const command = async <T,>(value: MarketingCommand): Promise<T> => {
     const generation = authGeneration.current;
     const { data: auth } = await getSupabaseClient().auth.getSession();
@@ -82,24 +78,49 @@ export function MarketingProvider({ children }: { children: ReactNode }) {
     return body.result as T;
   };
   const roles = data?.profile.roles || []; const admin = roles.includes("Admin"); const manager = admin || roles.includes("PR Leader"); const canWrite = manager || roles.includes("PR Representative");
-  const active = MARKETING_NAV.find((entry) => isMarketingActive(pathname, entry.href)) || MARKETING_NAV[0];
-  const safeSelected = data?.campaigns.some((c) => c.id === selected) ? selected : "";
-  return <div className={`mk-root ${embedded ? "mk-embedded" : ""}`}>
-    <a className="mk-skip" href="#marketing-main">Đến nội dung Marketing</a>
-    {!embedded && <><button className="mk-mobile-toggle" aria-expanded={mobile} aria-controls="marketing-sidebar" onClick={() => setMobile(!mobile)}>Menu</button><aside id="marketing-sidebar" onKeyDown={(e) => { if (e.key === "Escape") setMobile(false); }} className={`mk-sidebar ${mobile ? "mk-mobile-open" : ""}`}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <Link className="mk-logo" href="/"><img src="/colorme-logo.png" alt="ColorME" width="145" height="48" /><span>PARTNERSHIP WORKSPACE</span></Link>
-      <nav aria-label="Điều hướng ColorME"><p className="mk-nav-label">Báo cáo</p>{legacy.slice(0, 5).map(([id, label]) => <Link key={id} className="mk-nav-link" href={`/?legacy=${id}`}>{label}</Link>)}<p className="mk-nav-label">Quản lý công việc</p>{legacy.slice(5).filter(([id]) => id !== "phoihop" || canWrite).map(([id, label]) => <Link key={id} className="mk-nav-link" href={`/?legacy=${id}`}>{label}</Link>)}
-      <button className="mk-nav-parent" aria-expanded={open} aria-controls="marketing-subnav" onClick={() => setOpen(!open)}><Icon name="megaphone" /><span>Marketing</span><span aria-hidden="true">{open ? "⌄" : "›"}</span></button>
-      <div id="marketing-subnav" hidden={!open}>{MARKETING_NAV.map(({ href: path, label, icon }) => <Link key={path} className={`mk-nav-link mk-nav-child ${active.href === path ? "mk-current" : ""}`} href={href(path)} aria-current={active.href === path ? "page" : undefined}><Icon name={icon} />{label}</Link>)}</div>
-      {manager && <><p className="mk-nav-label">Hệ thống</p><Link className="mk-nav-link" href="/?legacy=taikhoan">Quản lý tài khoản</Link></>}
-      </nav><div className="mk-sidebar-profile">{data?.profile.fullName || "ColorME"}<small>{roles.join(" · ") || "Phiên tài khoản hiện tại"}</small></div>
-    </aside></>}
-    <div className="mk-content"><header className="mk-topbar"><div><span className="mk-eyebrow">COLORME PARTNERSHIP</span><p>Marketing <span aria-hidden="true">/</span> {active.label}</p></div>{data && <label className="mk-context">Campaign hiện tại<select value={safeSelected} onChange={(e) => { const id = e.target.value; select(id); if (/^\/marketing\/campaigns\/[^/]+$/.test(pathname)) router.push(id ? `/marketing/campaigns/${id}` : "/marketing/campaigns"); else { const url = new URL(window.location.href); if (pathname === "/marketing/studio") url.searchParams.delete("content"); if (id) url.searchParams.set("campaign", id); else url.searchParams.delete("campaign"); router.replace(url.pathname + url.search); } }}><option value="">Tất cả Campaign</option>{data.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}</header>
-      <main id="marketing-main" className="mk-main" tabIndex={-1}>
-      {loading && !data ? <div className="mk-loading" role="status"><span className="mk-eyebrow">MARKETING WORKSPACE</span><h1>Đang mở không gian làm việc…</h1><div className="mk-skeleton" /><div className="mk-skeleton" /></div> : !data ? <section className="mk-empty"><Icon name="folder" /><h1>{unauthorized ? "Tiếp tục với tài khoản ColorME" : "Chưa thể mở Marketing"}</h1><p role="alert">{error}</p>{unauthorized ? <a className="mk-button mk-primary" target={embedded ? "_top" : undefined} href={`/?returnTo=${encodeURIComponent(pathname + window.location.search)}`}>Đăng nhập Dashboard</a> : <button onClick={() => void load()}>Thử lại</button>}</section> : <Context.Provider value={{ data, refresh, command, selected: safeSelected, select, embedded, canWrite, manager, admin, phaseFiveAccessVersion, invalidateAccess: invalidate, href }}>{error && <div className="mk-notice" role="alert">{error}<button onClick={() => void load()}>Thử tải lại</button></div>}{!canWrite && <div className="mk-notice">Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.</div>}{children}</Context.Provider>}
-      </main><footer className="mk-footer">Asia/Ho_Chi_Minh · Dữ liệu theo quyền truy cập · Meta chưa kết nối</footer>
-    </div>
+  const safeSelected = data?.campaigns.some((campaign) => campaign.id === selected) ? selected : "";
+
+  function changeCampaign(id: string) {
+    select(id);
+    if (/^\/marketing\/campaigns\/[^/]+$/.test(pathname)) {
+      router.push(id ? `/marketing/campaigns/${id}` : "/marketing/campaigns");
+      return;
+    }
+    const url = new URL(window.location.href);
+    if (pathname === "/marketing/studio") url.searchParams.delete("content");
+    if (id) url.searchParams.set("campaign", id);
+    else url.searchParams.delete("campaign");
+    url.searchParams.delete("embedded");
+    router.replace(url.pathname + url.search);
+  }
+
+  return <div className="mk-root" id="marketing-main">
+    {data && <div className="mk-scope">
+      <span className="mk-eyebrow">Marketing</span>
+      <label className="mk-context">Campaign hiện tại
+        <select value={safeSelected} onChange={(event) => changeCampaign(event.target.value)}>
+          <option value="">Tất cả Campaign</option>
+          {data.campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+        </select>
+      </label>
+    </div>}
+    {loading && !data ? <MarketingLoading /> : !data ? <section className="mk-empty">
+      <Icon name="campaigns" />
+      <h1>{unauthorized ? "Phiên đăng nhập đã hết hạn" : "Chưa thể mở Marketing"}</h1>
+      <p role="alert">{error}</p>
+      <button type="button" onClick={() => void load()}>Thử lại</button>
+    </section> : <Context.Provider value={{ data, refresh, command, selected: safeSelected, select, canWrite, manager, admin, phaseFiveAccessVersion, invalidateAccess: invalidate, href }}>
+      {error && <div className="mk-notice" role="alert">{error}<button onClick={() => void load()}>Thử tải lại</button></div>}
+      {!canWrite && <div className="mk-notice">Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.</div>}
+      {children}
+    </Context.Provider>}
+  </div>;
+}
+
+export function MarketingLoading() {
+  return <div className="mk-loading" role="status">
+    <ColoroLoading />
+    <p>Đang mở Marketing…</p>
   </div>;
 }
 

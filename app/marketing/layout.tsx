@@ -1,7 +1,6 @@
 import { Suspense, type ReactNode } from "react";
-import { MarketingProvider } from "./workspace";
-import "./marketing.css";
+import { MarketingLoading, MarketingProvider } from "./workspace";
 
 export default function MarketingLayout({ children }: { children: ReactNode }) {
-  return <Suspense fallback={<div className="mk-root"><p role="status">Đang mở Marketing…</p></div>}><MarketingProvider>{children}</MarketingProvider></Suspense>;
+  return <Suspense fallback={<div className="mk-root"><MarketingLoading /></div>}><MarketingProvider>{children}</MarketingProvider></Suspense>;
 }

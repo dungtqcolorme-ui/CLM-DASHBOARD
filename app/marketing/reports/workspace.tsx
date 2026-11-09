@@ -10,7 +10,6 @@ import { phaseFiveCanWriteTeam } from "../video/access-scope";
 import { OrganicComparison } from "./organic-comparison";
 import { ReportMetricsView } from "./metrics";
 import { exactApproval, narrativeDigest, periodEnd } from "./report-model";
-import "../video/phase-five.css";
 
 type ReportsAPI = ReturnType<typeof usePhaseFive<ReportWorkspace>>;
 type ReportDraft = Pick<MarketingReport, "title" | "narrative" | "version">;

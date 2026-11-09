@@ -9,6 +9,12 @@ export const MARKETING_NAV = [
   { href: "/marketing/approvals", label: "Approval Inbox", icon: "approvals" },
 ] as const;
 
+const dashboardPages = ["doingoai", "truyenthong", "anpham", "hocbong", "baocao", "phoihop", "tailieu", "taikhoan"];
+
+export function dashboardPage(value: unknown): string | null {
+  return typeof value === "string" && dashboardPages.includes(value) ? value : null;
+}
+
 export function isMarketingPath(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 2000 || /[\\\u0000-\u0020\u007f]/.test(value)) return false;
   const rawPath = value.split(/[?#]/)[0];

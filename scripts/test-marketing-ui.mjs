@@ -28,6 +28,7 @@ const phase5Only=process.argv.includes('--phase5-only');
 const base=process.env.CLM_MARKETING_QA_URL||'http://localhost:3104';
 assert.match(base,/^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 const root=process.cwd(), out=resolve(root,'tmp/marketing');await mkdir(out,{recursive:true});
+const dashboardSource=await readFile('dashboard/clm-dashboard-private-34.html','utf8');
 const {PGlite}=await import(pathToFileURL(process.env.MARKETING_PGLITE_MODULE||'/private/tmp/clm-marketing-db-runtime/node_modules/@electric-sql/pglite/dist/index.js').href);
 const playwright=createRequire(process.env.CLM_QA_RUNTIME||'/Users/chandung/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json')('playwright');
 const db=new PGlite();
@@ -103,6 +104,19 @@ let planGate=null;
 let stageStarted=performance.now();
 const checkpoint=value=>{report.stageDurationsMs[stage]=Math.round(performance.now()-stageStarted);stageStarted=performance.now();stage=value;console.log('QA:',value);};
 const watchdog=setInterval(()=>console.log('QA pending:',stage),15000);watchdog.unref();
+function dashboardPage(page){
+ const shell=page.frameLocator('iframe.private-dashboard-frame');
+ const locate=new Set(['locator','getByRole','getByLabel','getByText','getByTestId']);
+ return new Proxy(page,{get(target,property){
+  if(locate.has(property))return shell[property].bind(shell);
+  if(property==='evaluate'||property==='evaluateHandle'||property==='waitForFunction')return async (...args)=>{
+   const frame=await (await target.locator('iframe.private-dashboard-frame').elementHandle()).contentFrame();
+   await frame.locator('#cos-main').waitFor({state:'attached'});
+   return frame[property](...args);
+  };
+  const value=target[property];return typeof value==='function'?value.bind(target):value;
+ }});
+}
 async function context(actor,viewport={width:1440,height:1000}){
  const ctx=await browser.newContext({viewport,reducedMotion:'reduce'});
  // Chromium's intercepted multipart metadata omits the bytes of File parts.
@@ -151,11 +165,17 @@ async function context(actor,viewport={width:1440,height:1000}){
   if(url.pathname==='/api/dashboard/state')return route.fulfill({json:{events:[],notifications:[],users:[]}});
   if(url.pathname==='/api/dashboard/shell'){
    report.legacyShellLoads++;
-   return route.fulfill({contentType:'text/html',body:'<!doctype html><html data-clm-ready="1"><input id="legacy-unsaved" aria-label="Dữ liệu đang nhập"><button id="open-marketing" onclick="parent.postMessage({type:\'clm-marketing-open\',path:\'/marketing\'},location.origin)">Marketing</button><script>window.go=function(p){document.body.dataset.legacyPage=p};parent.postMessage({type:"clm-dashboard-ready"},location.origin)</script></html>'});
+   const role={Admin:'Admin','PR Leader':'Leader','PR Representative':'Staff',Viewer:'Viewer'}[actor.roles[0]];
+   const fixture=creativeOsFixture+`
+session.role=${JSON.stringify(role)}; session.ten=${JSON.stringify(actor.fullName)}; session.authRoles=${JSON.stringify(actor.roles)}; ui.collapsed=false; render();
+document.documentElement.dataset.clmReady='1';
+parent.postMessage({type:'clm-dashboard-ready'},location.origin);
+`;
+   return route.fulfill({contentType:'text/html',body:dashboardSource.replace(/\nclmBoot\(\);\s*\n/,()=>fixture)});
   }
   return route.continue();
  });
- const page=await ctx.newPage();lastPage=page;page.setDefaultTimeout(12000);page.setDefaultNavigationTimeout(45000);page.on('pageerror',error=>report.errors.push(error.message));return {ctx,page};
+ const page=await ctx.newPage();lastPage=page;page.setDefaultTimeout(12000);page.setDefaultNavigationTimeout(45000);page.on('pageerror',error=>report.errors.push(error.message));return {ctx,page:actor?dashboardPage(page):page,top:page};
 }
 async function shot(page,name){const path=resolve(out,name+'.png');await page.evaluate(()=>{window.scrollTo(0,0);if(document.getElementById('mk-qa-label'))return;const label=document.createElement('div');label.id='mk-qa-label';label.textContent='DỮ LIỆU MINH HỌA · KIỂM THỬ LOCAL · KHÔNG KẾT NỐI PRODUCTION';label.style.cssText='position:fixed;bottom:8px;right:8px;z-index:2147483647;background:#242328;color:white;border-radius:5px;padding:7px 10px;font:10px Arial;max-width:90vw;pointer-events:none';document.body.append(label);});await page.screenshot({path,fullPage:true,animations:'disabled'});report.screenshots.push(path);}
 async function cmd(page,actor,command,endpoint='/api/marketing'){const result=await page.evaluate(async ({token,command,endpoint})=>{const r=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(command)});return {status:r.status,body:await r.json()};},{token:tokenFor(actor),command,endpoint});assert.equal(result.status,200,JSON.stringify(result.body));return result.body.result;}
@@ -163,7 +183,7 @@ async function deadline(promise){let timer;try{return await Promise.race([promis
 let calendarPublishedId=null;
 try{
  checkpoint('signed-out deep link');
- const signedOut=await context(null);await signedOut.page.goto(base+'/marketing/studio');await signedOut.page.getByRole('link',{name:'Đăng nhập Dashboard'}).waitFor();report.checks.push('Deep link requires existing ColorME sign-in');await signedOut.ctx.close();
+ const signedOut=await context(null);await signedOut.page.goto(base+'/marketing/studio');await signedOut.page.getByRole('button',{name:'Đăng nhập',exact:true}).waitFor();assert.equal(await signedOut.page.locator('iframe.private-dashboard-frame').count(),0);report.checks.push('Marketing deep link uses the shared ColorME sign-in');await signedOut.ctx.close();
  const admin=await context(actors[0]),p=admin.page;
  checkpoint('team setup');
  await p.goto(base+'/marketing');await p.getByLabel('Tên team mới').fill('Partnership · dữ liệu kiểm thử');await p.getByRole('button',{name:'Tạo team',exact:true}).click();await p.getByText('Đã tạo team Marketing.').waitFor();
@@ -261,13 +281,81 @@ try{
  }
  report.checks.push('All eight real routes/deep links/empty states load without fake metrics');
  await p.getByRole('link',{name:'Campaigns',exact:true}).click();await p.getByRole('heading',{name:'Campaigns',exact:true}).waitFor();await p.goBack();await p.getByRole('heading',{name:'Approval Inbox',exact:true}).waitFor();await p.goForward();await p.getByRole('heading',{name:'Campaigns',exact:true}).waitFor();assert.equal(await p.getByRole('link',{name:'Campaigns',exact:true}).getAttribute('aria-current'),'page');report.checks.push('Browser back/forward restores child route and active navigation');
- await p.getByRole('button',{name:'Marketing',exact:true}).click();assert.equal(await p.locator('#marketing-subnav').isVisible(),false);await p.getByRole('button',{name:'Marketing',exact:true}).press('Enter');assert.equal(await p.locator('#marketing-subnav').isVisible(),true);
+ await p.getByRole('button',{name:'Marketing',exact:true}).click();assert.equal(await p.locator('#clm-marketing-children').isVisible(),false);await p.getByRole('button',{name:'Marketing',exact:true}).press('Enter');assert.equal(await p.locator('#clm-marketing-children').isVisible(),true);
+ await p.setViewportSize({width:900,height:1000});await p.goto(base+'/marketing/studio');await p.getByRole('heading',{name:'Creative Studio',exact:true}).waitFor();assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'No tablet overflow');await shot(p,'studio-tablet');
  await p.setViewportSize({width:390,height:844});for(const path of ['/marketing','/marketing/calendar','/marketing/studio','/marketing/approvals']){await p.goto(base+path);await p.getByRole('heading',{name:titles[path==='/marketing'?'overview':path.split('/').pop()],exact:true}).waitFor();assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'No mobile overflow '+path);await shot(p,path.split('/').pop()+'-mobile');}
- report.checks.push('Keyboard disclosure, reduced motion, mobile 390px without page overflow');
+ await p.getByRole('button',{name:'Mở menu',exact:true}).click();
+ await p.getByRole('navigation',{name:'Điều hướng chính',exact:true}).getByRole('link',{name:'Campaigns',exact:true}).click();
+ await p.getByRole('heading',{name:'Campaigns',exact:true}).waitFor();
+ assert.equal(await p.locator('.sidebar.mobile-open').count(),0);
+ report.checks.push('Keyboard disclosure, reduced motion and desktop/tablet/mobile without page overflow');
  const viewer=await context(actors[3]);await viewer.page.goto(base+'/marketing/campaigns');await viewer.page.getByText('Chế độ chỉ xem · Quyền chỉnh sửa do vai trò và phạm vi team quyết định.').waitFor();assert.equal(await viewer.page.getByRole('button',{name:'+ Tạo Campaign'}).count(),0);assert.equal(await viewer.page.evaluate(async token=>(await fetch('/api/marketing/readiness',{headers:{Authorization:'Bearer '+token}})).status,tokenFor(actors[3])),403);await viewer.ctx.close();
  const rep=await context(actors[1]);await rep.page.goto(base+'/marketing/campaigns/'+campaign.id);await rep.page.locator('#marketing-main h1').waitFor();assert.equal(await rep.page.getByRole('button',{name:'Tạm dừng',exact:true}).count(),0);await rep.ctx.close();report.checks.push('Viewer write controls absent; Representative activation controls absent');
- // Persistent host fixture verifies actual app route/iframe lifecycle, not legacy business logic.
- const host=await context(actors[0]);await host.page.goto(base+'/');const frame=host.page.frameLocator('iframe.private-dashboard-frame');await frame.getByLabel('Dữ liệu đang nhập').fill('Giữ nguyên form chưa lưu');await frame.locator('#open-marketing').click();await host.page.getByRole('heading',{name:'Marketing Overview',exact:true}).waitFor();await host.page.getByRole('link',{name:'Đối ngoại',exact:true}).click();await frame.getByLabel('Dữ liệu đang nhập').waitFor();assert.equal(await frame.getByLabel('Dữ liệu đang nhập').inputValue(),'Giữ nguyên form chưa lưu');assert.equal(report.legacyShellLoads,1);await host.ctx.close();report.checks.push('Legacy iframe and unsaved input survive Marketing roundtrip, one shell load');
+ checkpoint('one shared shell and Legacy Task roundtrip');
+ const shellLoads=report.legacyShellLoads;
+ const host=await context(actors[0]);const shell=host.page;await shell.goto(base+'/');
+ const sidebar=shell.getByRole('navigation',{name:'Điều hướng chính',exact:true});
+ await sidebar.getByRole('button',{name:'Marketing',exact:true}).waitFor();
+ await shell.evaluate('render()');
+ await shell.evaluate(()=>{document.getElementById('cos-main').insertAdjacentHTML('afterbegin','<input aria-label="Dữ liệu đang nhập">');});
+ await shell.getByLabel('Dữ liệu đang nhập').fill('Giữ nguyên form chưa lưu');
+ const sidebarWidth=(await shell.locator('.sidebar').boundingBox()).width;
+ await sidebar.getByRole('button',{name:'Marketing',exact:true}).click();
+ await sidebar.getByRole('link',{name:'Marketing Overview',exact:true}).click();
+ await shell.getByRole('heading',{name:'Marketing Overview',exact:true}).waitFor();
+ assert.equal(await host.top.locator('iframe.private-dashboard-frame').count(),1);
+ assert.equal(await shell.locator('.sidebar').count(),1);assert.equal(await shell.locator('.header').count(),1);
+ assert.equal((await shell.locator('.sidebar').boundingBox()).width,sidebarWidth);
+ assert.equal(await shell.locator('#clm-marketing-content .mk-root').count(),1);
+ assert.equal(await shell.locator('#cos-main').isVisible(),false);
+ await shot(shell,'integration-marketing-desktop');
+ await shell.goBack();await shell.getByLabel('Dữ liệu đang nhập').waitFor();
+ assert.equal(await shell.getByLabel('Dữ liệu đang nhập').inputValue(),'Giữ nguyên form chưa lưu');
+ await shell.goForward();await shell.getByRole('heading',{name:'Marketing Overview',exact:true}).waitFor();
+ await shell.evaluate('renderPageInPlace()');
+ await sidebar.getByRole('button',{name:'Đối ngoại',exact:true}).click();await shell.waitForURL(/legacy=doingoai/);
+ assert.equal(await shell.getByLabel('Dữ liệu đang nhập').inputValue(),'Giữ nguyên form chưa lưu');
+ await sidebar.getByRole('link',{name:'Marketing Overview',exact:true}).click();await shell.getByRole('heading',{name:'Marketing Overview',exact:true}).waitFor();
+ await sidebar.getByRole('link',{name:'Campaigns',exact:true}).click();await shell.getByRole('heading',{name:'Campaigns',exact:true}).waitFor();
+ await shell.getByLabel('Campaign hiện tại').selectOption(campaign.id);
+ await sidebar.getByRole('link',{name:'Creative Studio',exact:true}).click();await shell.getByRole('heading',{name:'Creative Studio',exact:true}).waitFor();
+ await shell.getByLabel('Tên nội dung',{exact:true}).fill('Nháp giữ qua Task hàng ngày');
+ await sidebar.getByRole('link',{name:'Content Calendar',exact:true}).click();await shell.getByRole('heading',{name:'Content Calendar',exact:true}).waitFor();
+ await sidebar.getByRole('button',{name:'Task hàng ngày',exact:true}).click();await shell.waitForURL(/legacy=phoihop/);
+ await shell.getByRole('heading',{name:'Task hàng ngày',exact:true}).waitFor();
+ await shell.evaluate(`modal('<label>Nháp trong hộp thoại Task<input></label>')`);
+ await shell.getByLabel('Nháp trong hộp thoại Task').fill('Giữ nháp hộp thoại');
+ await shell.goBack();await shell.getByRole('heading',{name:'Content Calendar',exact:true}).waitFor();
+ assert.equal(await shell.getByLabel('Nháp trong hộp thoại Task').isVisible(),false);
+ await shell.goForward();await shell.getByLabel('Nháp trong hộp thoại Task').waitFor();
+ assert.equal(await shell.getByLabel('Nháp trong hộp thoại Task').inputValue(),'Giữ nháp hộp thoại');
+ await shell.getByLabel('Nháp trong hộp thoại Task').press('Escape');
+ await shell.evaluate(`(() => {
+  const rpc=clmRpc;
+  clmRpc=(action,payload)=>action==='save-work-item'
+   ?new Promise(resolve=>{window.finishTaskSave=()=>resolve({version:1});})
+   :rpc(action,payload);
+  openUnifiedForm('personal');
+ })()`);
+ await shell.locator('#uw-title').fill('Task đang lưu khi chuyển module');
+ await shell.locator('#uw-deadline').fill('2026-11-20');
+ await shell.locator('#uw-save').click();
+ await shell.waitForFunction(()=>typeof window.finishTaskSave==='function');
+ await shell.goBack();await shell.getByRole('heading',{name:'Content Calendar',exact:true}).waitFor();
+ await shell.evaluate(`modal('<h3>Hộp thoại mở trong Marketing</h3>'); window.finishTaskSave();`);
+ await shell.getByText('Đã tạo công việc',{exact:true}).waitFor();
+ assert.equal(await shell.getByRole('heading',{name:'Hộp thoại mở trong Marketing',exact:true}).isVisible(),true);
+ await shell.locator('#modal-root .modal:visible').press('Escape');
+ await shell.goForward();await shell.getByRole('heading',{name:'Task hàng ngày',exact:true}).waitFor();
+ assert.equal(await shell.locator('#uw-save').count(),0);
+ await sidebar.getByRole('link',{name:'Creative Studio',exact:true}).click();await shell.getByRole('heading',{name:'Creative Studio',exact:true}).waitFor();
+ assert.equal(await shell.getByLabel('Campaign hiện tại').inputValue(),campaign.id);
+ assert.equal(await shell.getByLabel('Tên nội dung',{exact:true}).inputValue(),'Nháp giữ qua Task hàng ngày');
+ await shell.getByRole('button',{name:'Thu gọn sidebar',exact:true}).click();assert.equal(await shell.locator('.sidebar.collapsed').count(),1);
+ await shell.getByRole('button',{name:'Mở rộng sidebar',exact:true}).click();assert.equal(await shell.locator('.sidebar.collapsed').count(),0);
+ assert.equal(await shell.getByLabel('Tên nội dung',{exact:true}).inputValue(),'Nháp giữ qua Task hàng ngày');
+ assert.equal(report.legacyShellLoads-shellLoads,1);
+ await host.ctx.close();report.checks.push('One actual sidebar/header across Overview, Campaigns, Studio, Calendar and Task; history, drafts and delayed Task save are preserved');
  // Actual legacy document: disclosure integration, original module ordering and collapsed/mobile behavior.
  const legacyCtx=await browser.newContext({viewport:{width:1440,height:1000}}),legacy=await legacyCtx.newPage();
  const baseRevision=(await readFile('docs/marketing/BASE_REVISION','utf8')).trim();assert.match(baseRevision,/^[0-9a-f]{40}$/);

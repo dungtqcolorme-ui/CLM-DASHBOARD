@@ -10,7 +10,6 @@ import { useKnowledge, type KnowledgeController } from "./use-knowledge";
 import { KnowledgeState, Evidence, useKnowledgeScope } from "./shared";
 import { KnowledgeReview } from "./review";
 import { IdeaRadar, WeeklyPlanner } from "./ideas";
-import "./knowledge.css";
 import { knowledgeLabel } from "./shared-labels";
 
 export function AgentKnowledge() {

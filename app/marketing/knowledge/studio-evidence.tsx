@@ -4,7 +4,6 @@ import { isEvidenceCurrent } from "@/lib/marketing/knowledge-domain";
 import { useMarketing } from "../workspace";
 import { Evidence, KnowledgeState } from "./shared";
 import { useKnowledge } from "./use-knowledge";
-import "./knowledge.css";
 
 export function SelectedIdeaEvidence({ contentId, campaignId }: { contentId?: string; campaignId?: string }) {
   const { href } = useMarketing();

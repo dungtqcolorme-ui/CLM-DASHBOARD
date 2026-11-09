@@ -7,7 +7,6 @@ import { useMarketing } from "../workspace";
 import { useMountedEditor } from "../draft-cache";
 import { KnowledgeState, ReviewAction, useKnowledgeScope } from "./shared";
 import { useKnowledge, useKnowledgeDraft, type KnowledgeController } from "./use-knowledge";
-import "./knowledge.css";
 import { knowledgeLabel } from "./shared-labels";
 const empty: DnaPayload = { voice: "", hooks: "", cta: "", visual_notes: "", hard_rules: [] };
 const labels = { voice: "Giọng thương hiệu", hooks: "Định hướng hook", cta: "CTA", visual_notes: "Ghi chú hình ảnh", hard_rules: "Quy tắc bắt buộc" };

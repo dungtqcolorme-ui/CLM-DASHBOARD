@@ -12,7 +12,6 @@ import { CaptionControls, ClipControls, OverlayControls } from "./timeline-contr
 import { appendClip, aspects, blankTimeline } from "./timeline-model";
 import { useOperation, usePhaseFive, useVersionedDraft } from "./use-phase-five";
 import { phaseFiveCanWriteTeam } from "./access-scope";
-import "./phase-five.css";
 
 type ProjectDraft = Pick<VideoProject, "title" | "timeline" | "version">;
 

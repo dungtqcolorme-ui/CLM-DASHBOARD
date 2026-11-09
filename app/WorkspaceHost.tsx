@@ -2,23 +2,26 @@
 
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { isMarketingPath } from "@/lib/marketing/navigation";
+import { DashboardOutlet } from "./dashboard-outlet";
 
-// Load the large legacy application only when visited, then preserve its mounted
-// iframe and unsaved forms across client-side Marketing navigation.
+// Keep the authenticated Dashboard document mounted as the shared shell.
 const LegacyDashboard = dynamic(() => import("./page"), { ssr: false });
 
 export default function WorkspaceHost({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const legacyVisible = pathname === "/";
-  const [hasVisitedLegacy, setHasVisitedLegacy] = useState(legacyVisible);
-  if (legacyVisible && !hasVisitedLegacy) setHasVisitedLegacy(true);
-  useEffect(() => {
-    if (legacyVisible) window.dispatchEvent(new Event("clm-legacy-resume"));
-  }, [legacyVisible]);
+  const marketing = isMarketingPath(pathname);
+  const dashboardVisible = pathname === "/" || marketing;
+  const [hasVisitedDashboard, setHasVisitedDashboard] = useState(dashboardVisible);
+  if (dashboardVisible && !hasVisitedDashboard) setHasVisitedDashboard(true);
 
   return <>
-    <div data-clm-legacy-host hidden={!legacyVisible}>{hasVisitedLegacy && <LegacyDashboard />}</div>
-    {!legacyVisible && children}
+    <div data-clm-legacy-host hidden={!dashboardVisible}>
+      <DashboardOutlet.Provider value={marketing ? children : null}>
+        {hasVisitedDashboard && <LegacyDashboard />}
+      </DashboardOutlet.Provider>
+    </div>
+    {!dashboardVisible && children}
   </>;
 }
