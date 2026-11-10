@@ -102,4 +102,32 @@ export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,
  asset=(await db.query('select * from marketing_assets where id=$1',[asset.id])).rows[0];await command(p,actors[0],{action:'review_asset',id:asset.id,expected_version:asset.version,rights:'revoked',reason:'Kiểm thử thu hồi sau khi đã preview.',allowed_channels:[],valid_until:null});const downloadsBeforeRevokedExport=downloads.length;const sceneBeforeRevokedExport=await p.locator('pre').last().textContent();await p.getByRole('button',{name:'Xuất PNG tất cả trang',exact:true}).click();await p.getByText('Preflight chặn xuất: kiểm tra quyền ảnh.',{exact:true}).waitFor();await p.getByText(/Ảnh không khả dụng:.*hết hạn hoặc bị thu hồi/).waitFor();assert.equal(downloads.length,downloadsBeforeRevokedExport);assert.equal(await p.locator('pre').last().textContent(),sceneBeforeRevokedExport);report.checks.push('Revoked preview resource 403 preserves scene and export status; export blocks with no new downloads');
  await p.setViewportSize({width:390,height:844});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await shot(p,'phase3-workbench-mobile');await p.setViewportSize({width:1440,height:1000});
  report.checks.push('Phase3 actual upload/review, editable two-page canvas, PNG downloads, campaign template, dirty caption preservation/conflict and revocation export gate; Storage fixture only');
+
+ const chatSettings=p.getByRole('complementary',{name:'Trợ lý Creative Studio'});
+ const webChat=chatSettings.getByRole('link',{name:'Mở cuộc chat trên ChatGPT',exact:true});
+ await chatSettings.getByText('Thêm liên kết ChatGPT',{exact:true}).click();
+ const url=chatSettings.getByLabel('Liên kết cuộc chat ChatGPT',{exact:true});
+ const saveLink=chatSettings.getByRole('button',{name:'Lưu liên kết ChatGPT',exact:true});
+ const conversationPath='/c/12345678-90ab-cdef-1234-567890abcdef';
+ await url.fill('https://chatgpt.com.invalid'+conversationPath);
+ await saveLink.click();
+ assert.match(await chatSettings.getByRole('alert').innerText(),/Dùng địa chỉ/);
+ assert.equal(await webChat.count(),0);
+ const destination='https://chatgpt.com'+conversationPath;
+ await url.fill(destination+'?ref=qa#test');
+ await saveLink.click();
+ await webChat.waitFor();
+ assert.equal(await webChat.getAttribute('href'),destination);
+ assert.equal(await webChat.getAttribute('target'),'_blank');
+ assert.equal(await webChat.getAttribute('rel'),'noopener noreferrer');
+ await p.reload();
+ await webChat.waitFor();
+ assert.equal(await webChat.getAttribute('href'),destination);
+ await chatSettings.getByText('Đổi liên kết ChatGPT',{exact:true}).click();
+ await chatSettings.getByRole('button',{name:'Gỡ liên kết ChatGPT',exact:true}).click();
+ await webChat.waitFor({state:'detached'});
+ await p.reload();
+ await chatSettings.getByText('Thêm liên kết ChatGPT',{exact:true}).waitFor();
+ assert.equal(await webChat.count(),0);
+ report.checks.push('Studio web chat validates official conversation URLs, stores the preference across reload, opens in a separate tab without referrer, and can clear the saved link');
 }

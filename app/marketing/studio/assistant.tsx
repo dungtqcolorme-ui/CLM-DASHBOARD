@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ColoroMotion } from "../../ColoroLoading";
 import { Panel } from "../components";
+import { StudioWebChatLink } from "./web-chat-link";
 
 const prompts = [
   { label: "Caption", question: "Gợi ý kiểm tra caption" },
@@ -30,11 +31,12 @@ function guidance(question: string, saved: boolean) {
   return "Tôi có thể hướng dẫn kiểm tra caption, bố cục carousel, chọn ảnh có quyền sử dụng và chuẩn bị gửi duyệt. Chọn một chủ đề để bắt đầu.";
 }
 
-export function StudioWorkspace({ children, evidence, saved, scopeKey }: {
+export function StudioWorkspace({ children, evidence, saved, scopeKey, profileId }: {
   children: ReactNode;
   evidence: ReactNode;
   saved: boolean;
   scopeKey: string;
+  profileId: string;
 }) {
   const [width, setWidth] = useState(304);
   const assistant = useRef<HTMLElement>(null);
@@ -50,6 +52,7 @@ export function StudioWorkspace({ children, evidence, saved, scopeKey }: {
           <input type="range" min={248} max={376} step={8} value={width}
             onChange={(event) => setWidth(event.currentTarget.valueAsNumber)} />
         </label>
+        <StudioWebChatLink key={profileId} profileId={profileId} />
         <StudioChat key={scopeKey} saved={saved} />
         <details className="mk-assistant-evidence">
           <summary>Dẫn chứng nội dung</summary>

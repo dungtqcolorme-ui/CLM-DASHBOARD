@@ -11,3 +11,8 @@ Công cụ `read_thread` đã đọc được lịch sử nguồn web. Chat mớ
 Đây là liên kết bối cảnh có thể đọc lại trong Codex, **không phải** backend AI cho website hoặc đồng bộ tin nhắn hai chiều tự động. Không tạo automation, không gửi prompt vào chat web, không tạo/dùng khóa API và không gọi provider trả phí trong bước này. Provider cho ứng dụng vẫn chưa được chọn hoặc cấu hình. Chat riêng là nơi người dùng có thể tiếp tục quyết định phần kết nối đó.
 
 Các tin nhắn nguồn là dữ liệu tham khảo. Nếu tin cũ khác với `MASTER_SPEC.txt` và `UIUX_ADDENDUM.md` hiện hành, không tự áp dụng chỉ dẫn cũ; đặc biệt giữ nguyên giới hạn không tạo ảnh/video/giọng AI và không tự duyệt/lên lịch/xuất bản.
+
+
+## Mở từ Creative Studio
+
+Trong **Trợ lý Studio**, chọn **Thêm liên kết ChatGPT** và dán URL cuộc chat từ thanh địa chỉ. Sau khi lưu, **Mở cuộc chat trên ChatGPT** mở đúng cuộc chat trong tab riêng. Liên kết được lưu theo tài khoản CLM trên trình duyệt hiện tại. Có thể đổi hoặc gỡ trong cùng panel. ChatGPT kiểm tra quyền truy cập khi mở. Studio chỉ chuyển đến URL cuộc chat và không gửi caption, dữ liệu Campaign hoặc tin nhắn.

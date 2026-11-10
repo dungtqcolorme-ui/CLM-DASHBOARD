@@ -38,7 +38,7 @@ function Studio() {
         <span>{campaign?.name || "Chọn Campaign trong biểu mẫu"}</span>
         {item && <><Badge status={item.production_status} /><Badge status={item.publishing_status} /><span>v{item.version}</span></>}
       </div>
-      <StudioWorkspace scopeKey={scopeKey} saved={Boolean(item)}
+      <StudioWorkspace profileId={data.profile.id} scopeKey={scopeKey} saved={Boolean(item)}
         evidence={<SelectedIdeaEvidence key={scopeKey} contentId={item?.id} campaignId={campaign?.id} />}>
         <Panel title={item ? "Caption & kế hoạch sản xuất" : "Tạo bản nháp nội dung"}>
           {!canWrite && !item ? <Empty title="Chế độ chỉ xem">
