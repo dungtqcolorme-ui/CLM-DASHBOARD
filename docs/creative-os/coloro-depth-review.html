@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coloro · Mẫu thử chiều sâu</title>
+  <link rel="stylesheet" href="../../public/creative-os/tokens.css">
+  <style>
+    body { margin: 0; background: var(--cos-paper); color: var(--cos-ink); font: 1rem/1.55 system-ui, sans-serif; }
+    main { width: min(calc(100% - 2rem), 42rem); margin: 3rem auto; }
+    h1 { line-height: 1.15; }
+    p { max-width: 58ch; }
+    .stage { display: grid; place-items: center; perspective: 560px; min-height: 300px; background: var(--cos-surface); border-radius: var(--cos-radius-card); }
+    .relief { position: relative; width: min(58%, 236px); aspect-ratio: 132 / 123; transform-style: preserve-3d; transform: rotateY(var(--angle, 0deg)); }
+    .relief img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    .relief img:nth-child(1) { transform: translateZ(-8px); filter: brightness(.7); }
+    .relief img:nth-child(2) { transform: translateZ(-4px); filter: brightness(.85); }
+    .relief img:nth-child(3) { transform: translateZ(0); }
+    .control { display: grid; gap: .5rem; margin-block: 1rem; }
+    input { min-height: 44px; accent-color: var(--cos-ink); }
+    :focus-visible { outline: 2px solid var(--cos-info); outline-offset: 4px; }
+    [hidden] { display: none !important; }
+    @media (prefers-reduced-motion: reduce) {
+      .relief { transform: none; }
+      .relief img:not(:last-child) { display: none; }
+    }
+  </style>
+</head>
+<body class="cos-shell">
+  <main>
+    <h1>Coloro có chiều sâu</h1>
+    <p><strong>Mẫu thử chưa duyệt.</strong> Ba mặt phẳng dùng cùng SVG chính thức để thử hiệu ứng nổi. Mẫu này tách riêng khỏi ứng dụng.</p>
+    <div class="stage">
+      <div class="relief" id="relief" role="img" aria-label="Coloro từ SVG chính thức">
+        <img src="../../public/creative-os/coloro.svg" alt="">
+        <img src="../../public/creative-os/coloro.svg" alt="">
+        <img src="../../public/creative-os/coloro.svg" alt="">
+      </div>
+    </div>
+    <label class="control" id="turn-control" hidden>Góc nhìn
+      <input id="turn" type="range" min="-35" max="35" value="0" aria-valuetext="0 độ">
+    </label>
+    <p id="static-mode">Đang hiển thị góc nhìn tĩnh.</p>
+  </main>
+  <script>
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    const turn = document.getElementById('turn');
+    const control = document.getElementById('turn-control');
+    const relief = document.getElementById('relief');
+    const staticMode = document.getElementById('static-mode');
+    function sync() {
+      const supportsDepth = CSS.supports('transform-style', 'preserve-3d') && !preference.matches;
+      control.hidden = !supportsDepth;
+      staticMode.hidden = supportsDepth;
+      relief.style.setProperty('--angle', supportsDepth ? turn.value + 'deg' : '0deg');
+      turn.setAttribute('aria-valuetext', turn.value + ' độ');
+    }
+    turn.addEventListener('input', sync);
+    preference.addEventListener('change', sync);
+    sync();
+  </script>
+</body>
+</html>

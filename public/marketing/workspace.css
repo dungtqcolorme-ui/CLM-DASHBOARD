@@ -78,3 +78,98 @@ body:has(#clm-marketing-content:not([hidden])) #app-loading-v3 { display: none !
   .mk-studio > aside:last-child { display: block; order: 3; }
   .mk-scope { align-items: start; }
 }
+
+/* Studio keeps the editing surface first in reading and keyboard order. */
+.mk-studio-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--mk-assistant-width, 304px);
+  align-items: start;
+  gap: var(--cos-space-4);
+  margin-block-end: var(--cos-space-5);
+}
+.mk-root .mk-assistant-jump { display: none; }
+.mk-studio-assistant {
+  --mk-assistant-top: calc(var(--header-h, 76px) + var(--cos-space-3));
+  position: sticky;
+  inset-block-start: var(--mk-assistant-top);
+  min-width: 0;
+  max-block-size: calc(100dvh - var(--mk-assistant-top) - var(--cos-space-3));
+  overflow: auto;
+  scroll-margin-block-start: var(--mk-assistant-top);
+}
+.mk-studio-assistant:focus-visible { outline: 2px solid var(--cos-info); outline-offset: 3px; }
+.mk-assistant-resize { display: flex; align-items: center; gap: var(--cos-space-2); font-size: var(--cos-type-small); }
+.mk-root :is(.mk-assistant-resize, .cr-zoom) input[type=range] {
+  min-width: 70px;
+  padding: 0;
+  accent-color: var(--cos-ink);
+  background: transparent;
+  border: 0;
+}
+.mk-assistant-intro { display: flex; align-items: center; gap: var(--cos-space-2); }
+.mk-root .mk-assistant-intro p { color: var(--cos-muted); margin: 0; font-size: var(--cos-type-small); }
+.mk-assistant-chat, .mk-assistant-form, .mk-assistant-log { display: grid; gap: var(--cos-space-2); min-width: 0; }
+.mk-assistant-log { max-block-size: 265px; overflow: auto; }
+.mk-assistant-log:empty { height: 0; overflow: hidden; }
+.mk-assistant-turn { display: grid; gap: var(--cos-space-1); font-size: var(--cos-type-small); }
+.mk-root .mk-assistant-turn p {
+  padding: var(--cos-space-2) var(--cos-space-3);
+  margin: 0;
+  border-radius: var(--cos-radius);
+  background: var(--cos-subtle);
+  overflow-wrap: anywhere;
+}
+.mk-assistant-turn strong { display: block; margin-block-end: var(--cos-space-1); }
+.mk-assistant-prompts { display: flex; flex-wrap: wrap; gap: var(--cos-space-1); }
+.mk-root .mk-assistant-prompts button { padding-inline: var(--cos-space-2); font-size: var(--cos-type-small); }
+.mk-assistant-form label { display: grid; gap: var(--cos-space-1); font-size: var(--cos-type-small); font-weight: 600; }
+.mk-assistant-evidence { margin-block-start: var(--cos-space-3); }
+.mk-assistant-evidence summary { cursor: pointer; padding-block: var(--cos-space-2); }
+
+.cr-tools, .cr-zoom { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cos-space-2); margin-block: var(--cos-space-3); }
+.cr-zoom .mk-field { margin: 0; flex: 1; }
+.cr-grid { display: flex; flex-wrap: wrap; align-items: start; gap: var(--cos-space-4); }
+.cr-stage { flex: 3 1 405px; min-width: 0; }
+.cr-inspector { flex: 1 1 210px; min-width: 0; }
+.cr-canvas {
+  max-width: 100%;
+  --cr-frame-height: min(68dvh, 740px);
+  --cr-frame-padding: var(--cos-space-3);
+  max-height: var(--cr-frame-height);
+  overflow: auto;
+  background: var(--cos-subtle);
+  padding: var(--cr-frame-padding);
+  border-radius: var(--cos-radius);
+}
+.cr-canvas canvas { display: block; margin-inline: auto; }
+.cr-canvas canvas:focus-visible { outline: 2px solid var(--cos-info); outline-offset: 2px; }
+.cr-strip {
+  display: flex;
+  gap: var(--cos-space-2);
+  overflow: auto;
+  padding: var(--cos-space-2) var(--cos-space-1);
+}
+.mk-root .cr-strip button {
+  display: grid;
+  gap: var(--cos-space-1);
+  justify-items: center;
+  flex: none;
+  min-width: 84px;
+  padding: var(--cos-space-1);
+  font-size: var(--cos-type-small);
+}
+.cr-strip canvas { display: block; max-height: 76px; width: auto; border: 1px solid var(--cos-border); }
+.mk-root .cr-strip button[aria-pressed=true], .mk-root .cr-inspector button[aria-pressed=true] {
+  border-color: var(--cos-ink);
+  background: var(--cos-subtle);
+}
+.cr-assets { display: grid; gap: var(--cos-space-2); max-height: 310px; overflow: auto; padding: var(--cos-space-1); }
+.cr-assets > div { display: flex; flex-wrap: wrap; gap: var(--cos-space-1); }
+.cr-inspector button { overflow-wrap: anywhere; }
+
+@container marketing (max-width: 1020px) {
+  .mk-studio-workspace { grid-template-columns: minmax(0, 1fr); }
+  .mk-studio-assistant { position: static; max-block-size: none; overflow: visible; }
+  .mk-assistant-resize { display: none; }
+  .mk-root .mk-assistant-jump { display: inline-flex; justify-self: start; }
+}

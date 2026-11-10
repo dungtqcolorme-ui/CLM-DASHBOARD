@@ -1,13 +1,13 @@
 /* Standalone application-state controller. No DOM, canvas, or timer loop. */
 (function (scope) {
   'use strict';
-  const STATES = new Set(('IDLE BLINK CURIOUS LOOK_LEFT LOOK_RIGHT LOOK_UP THINKING LOADING PEEK HAPPY EXCITED SUCCESS WARNING OOPS SLEEPY CELEBRATE FOCUS_MODE').split(' '));
+  const STATES = new Set(('IDLE BLINK CURIOUS LOOK_LEFT LOOK_RIGHT LOOK_UP THINKING LOADING PEEK HAPPY EXCITED SUCCESS WARNING OOPS SLEEPY CREATIVE CELEBRATE FOCUS_MODE').split(' '));
   const EVENTS = Object.freeze({
     DATA_LOADING: ['THINKING', 2, 0], DATA_READY: ['IDLE', 2, 0],
     NO_RESULTS: ['CURIOUS', 1, 0], ACTION_SUCCESS: ['SUCCESS', 3, 600],
     TASK_COMPLETED: ['SUCCESS', 3, 600], DEAL_SIGNED: ['CELEBRATE', 3, 800],
     DEADLINE_APPROACHING: ['WARNING', 4, 800], ERROR: ['OOPS', 5, 800],
-    FOCUS: ['FOCUS_MODE', 6, 0],
+    CREATIVE_ACTION: ['CREATIVE', 2, 580], FOCUS: ['FOCUS_MODE', 6, 0],
   });
   class MascotController {
     constructor(options = {}) {

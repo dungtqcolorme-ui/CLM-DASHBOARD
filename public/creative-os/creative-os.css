@@ -87,15 +87,15 @@
 .cos-primary-head h3{font-size:23px;line-height:1.2;letter-spacing:-.8px;margin:8px 0 6px;color:var(--cos-ink);font-weight:550}
 .cos-primary-head p{font-size:11px;color:var(--cos-muted)}
 .cos-companion{width:88px;display:grid;justify-items:center;gap:7px;pointer-events:none;user-select:none;flex:none;transition:opacity var(--cos-fast)}
-.cos-mascot{display:block;width:58px;height:54px;transform-origin:50% 80%;animation:cos-idle 8s var(--cos-ease) infinite}
+.cos-mascot{display:block;width:58px;height:54px;transform-origin:50% 80%;animation:cos-idle 4s var(--cos-ease) 1}
 .cos-mascot svg,.cos-mascot img{display:block;width:100%;height:100%;object-fit:contain;overflow:visible}
 .cos-companion small{font-size:6px;letter-spacing:.7px;color:var(--cos-ink);white-space:nowrap;font-weight:500}
 .cos-companion[data-paused=true]{opacity:.65}
 .cos-companion[data-paused=true] *{animation-play-state:paused!important}
 .cos-companion[data-presence='0']{visibility:hidden}
-.cos-mascot .cos-eye{transform-box:fill-box;transform-origin:center;animation:cos-blink 7s linear infinite}
+.cos-mascot .cos-eye{transform-box:fill-box;transform-origin:center;animation:cos-blink 4s linear 1}
 .cos-mascot [data-layer$=PUPIL] path,.cos-mascot [data-layer$=HIGHLIGHT] path{transform:translate(var(--cos-look-x,0px),var(--cos-look-y,0px));transition:transform var(--cos-fast) var(--cos-ease)}
-.cos-companion[data-state=SUCCESS] .cos-mascot,.cos-companion[data-state=HAPPY] .cos-mascot,.cos-companion[data-state=CELEBRATE] .cos-mascot{animation:cos-nod var(--cos-reaction) var(--cos-enter) both}
+.cos-companion[data-state=SUCCESS] .cos-mascot,.cos-companion[data-state=HAPPY] .cos-mascot,.cos-companion[data-state=CELEBRATE] .cos-mascot,.cos-companion[data-state=CREATIVE] .cos-mascot{animation:cos-nod var(--cos-reaction) var(--cos-enter) both}
 .cos-companion[data-state=THINKING] .cos-mascot,.cos-companion[data-state=LOADING] .cos-mascot{animation:none;transform:rotate(-5deg)}
 .cos-companion[data-state=OOPS] .cos-mascot,.cos-companion[data-state=WARNING] .cos-mascot{animation:none;transform:rotate(5deg)}
 .cos-output-spotlight{width:220px;max-width:100%;margin:54px 8px 36px auto;padding:20px;border-radius:16px;background:var(--cos-spotlight);box-shadow:var(--cos-shadow)}
