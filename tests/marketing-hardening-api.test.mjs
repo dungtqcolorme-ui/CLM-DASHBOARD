@@ -56,7 +56,7 @@ test('A schema marker and configured settings never mark unavailable drivers as 
   const { readMarketingReadiness } = load('lib/marketing/readiness.ts');
   const env = Object.fromEntries(['META_APP_ID', 'META_APP_SECRET', 'META_GRAPH_VERSION', 'MARKETING_CREDENTIALS_KEY', 'MARKETING_WORKER_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'].map((name) => [name, 'fixture-secret-value']));
   env.LIVE_META_PUBLISH_ENABLED = 'true';
-  const result = await readMarketingReadiness({ rpc: async () => ({ data: '20261109000100' }) }, env);
+  const result = await readMarketingReadiness({ rpc: async () => ({ data: '20261110000100' }) }, env);
   assert.equal(result.schema, 'current');
   assert.equal(result.liveMetaRequested, true);
   assert.equal(result.integrations.meta.status, 'adapter_unavailable');
@@ -77,7 +77,7 @@ test('Database operation budgets return a redacted 429 response', async () => {
 test('Deployment diagnostics prefer hosting identity and omit malformed metadata', async () => {
   const { load } = readinessFixture(['Admin'], {});
   const { readMarketingReadiness } = load('lib/marketing/readiness.ts');
-  const client = { rpc: async () => ({ data: '20261109000100' }) };
+  const client = { rpc: async () => ({ data: '20261110000100' }) };
   const result = await readMarketingReadiness(client, {
     VERCEL_ENV: 'production', CLM_DEPLOYMENT_ENV: 'staging',
     VERCEL_GIT_COMMIT_SHA: 'a'.repeat(40), CLM_RELEASE_SHA: 'b'.repeat(40),

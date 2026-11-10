@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ColoroMotion } from "../../ColoroLoading";
 import { Panel } from "../components";
-import { StudioWebChatLink } from "./web-chat-link";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const prompts = [
   { label: "Caption", question: "Gợi ý kiểm tra caption" },
@@ -31,12 +31,13 @@ function guidance(question: string, saved: boolean) {
   return "Tôi có thể hướng dẫn kiểm tra caption, bố cục carousel, chọn ảnh có quyền sử dụng và chuẩn bị gửi duyệt. Chọn một chủ đề để bắt đầu.";
 }
 
-export function StudioWorkspace({ children, evidence, saved, scopeKey, profileId }: {
+export function StudioWorkspace({ children, evidence, saved, scopeKey, profileId, codexAvailable }: {
   children: ReactNode;
   evidence: ReactNode;
   saved: boolean;
   scopeKey: string;
   profileId: string;
+  codexAvailable: boolean;
 }) {
   const [width, setWidth] = useState(304);
   const assistant = useRef<HTMLElement>(null);
@@ -52,8 +53,8 @@ export function StudioWorkspace({ children, evidence, saved, scopeKey, profileId
           <input type="range" min={248} max={376} step={8} value={width}
             onChange={(event) => setWidth(event.currentTarget.valueAsNumber)} />
         </label>
-        <StudioWebChatLink key={profileId} profileId={profileId} />
-        <StudioChat key={scopeKey} saved={saved} />
+        <StudioChat key={profileId + "/" + (codexAvailable ? "codex" : scopeKey)}
+          profileId={profileId} saved={saved} codexAvailable={codexAvailable} />
         <details className="mk-assistant-evidence">
           <summary>Dẫn chứng nội dung</summary>
           {evidence}
@@ -63,28 +64,147 @@ export function StudioWorkspace({ children, evidence, saved, scopeKey, profileId
   </div>;
 }
 
-function StudioChat({ saved }: { saved: boolean }) {
+type CodexQuestion = { id: string; message: string };
+
+function readPendingQuestion(key: string): CodexQuestion | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) ?? "null");
+    if (typeof value?.id === "string" && typeof value.message === "string" && value.message.length <= 1200
+      && Number.isFinite(value.createdAt) && Date.now() - value.createdAt < 86400000) {
+      return { id: value.id, message: value.message };
+    }
+  } catch { /* Studio can continue without tab storage. */ }
+  return null;
+}
+
+function rememberPendingQuestion(key: string, job: CodexQuestion) {
+  try { sessionStorage.setItem(key, JSON.stringify({ ...job, createdAt: Date.now() })); }
+  catch { /* The current tab can still follow the result. */ }
+}
+
+function StudioChat({ saved, profileId, codexAvailable }: {
+  saved: boolean;
+  profileId: string;
+  codexAvailable: boolean;
+}) {
   const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<{ id: number; question: string; answer: string }[]>([]);
+  const [pending, setPending] = useState("");
+  const [error, setError] = useState("");
+  const [resumeJob, setResumeJob] = useState<CodexQuestion | null>(null);
+  const active = useRef<AbortController | null>(null);
   const sequence = useRef(0);
   const log = useRef<HTMLDivElement>(null);
 
+  const storageKey = `clm:studio-codex:${profileId}`;
   useEffect(() => {
     if (log.current && turns.length) log.current.scrollTop = log.current.scrollHeight;
   }, [turns]);
 
-  function send(value: string) {
-    const text = value.trim();
-    if (!text) return;
-    const turn = { id: ++sequence.current, question: text, answer: guidance(text, saved) };
-    setTurns((current) => [...current.slice(-5), turn]);
+  const addTurn = useCallback((question: string, answer: string) => {
+    const turn = { id: ++sequence.current, question, answer };
+    setTurns(current => [...current.slice(-5), turn]);
     setQuestion("");
+  }, []);
+
+  const run = useCallback(async (job: CodexQuestion) => {
+    if (active.current) return;
+    const controller = new AbortController();
+    active.current = controller;
+    const signal = controller.signal;
+    setResumeJob(job);
+    setQuestion(job.message);
+    setError("");
+    setPending("Đang kết nối tới ColorME Marketing…");
+
+    function forgetJob() {
+      try { sessionStorage.removeItem(storageKey); } catch { /* No storage access. */ }
+      setResumeJob(null);
+    }
+
+    try {
+      const { data: { session } } = await getSupabaseClient().auth.getSession();
+      if (signal.aborted) return;
+      if (!session || session.user.id !== profileId) throw new Error("Phiên đăng nhập đã đổi. Hãy mở lại Studio.");
+      const headers = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
+      const url = "/api/marketing/studio-codex";
+      // The ID is reused on reload and network retry. The database creates only one turn for it.
+      const submitted = await fetch(url, {
+        method: "POST", headers, signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        body: JSON.stringify(job),
+      });
+      const receipt = await submitted.json().catch(() => null);
+      if (signal.aborted) return;
+      if (!submitted.ok || receipt?.id !== job.id) {
+        if (submitted.status === 400 || submitted.status === 409) forgetJob();
+        throw new Error(receipt?.error || "Chưa xác nhận được câu hỏi đã gửi.");
+      }
+
+      for (let attempt = 0; attempt < 150 && !signal.aborted; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (signal.aborted) return;
+        const response = await fetch(`${url}?id=${encodeURIComponent(job.id)}`, {
+          headers, signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]), cache: "no-store",
+        }).catch(() => null);
+        if (signal.aborted) return;
+        if (!response || response.status >= 500) {
+          setPending("Đang kết nối lại để lấy phản hồi…");
+          continue;
+        }
+        const result = await response.json().catch(() => null);
+        if (signal.aborted) return;
+        if (!response.ok) throw new Error(result?.error || "Chưa đọc được trạng thái Codex.");
+        if (result?.state === "completed" && typeof result.answer === "string" && result.answer.trim()) {
+          forgetJob();
+          addTurn(job.message, result.answer);
+          return;
+        }
+        if (result?.state === "failed") {
+          forgetJob();
+          throw new Error("Codex chưa trả lời. Kiểm tra cầu nối trên máy rồi thử lại.");
+        }
+        setPending(result?.state === "running" ? "ColorME Marketing đang trả lời…" : "Đang chờ Codex trên máy nhận câu hỏi…");
+      }
+      throw new Error("Đã hết thời gian chờ phản hồi từ Codex.");
+    } catch (cause) {
+      if (!signal.aborted) setError(cause instanceof Error ? cause.message : "Chưa thể hỏi Codex.");
+    } finally {
+      if (active.current === controller) {
+        active.current = null;
+        if (!signal.aborted) setPending("");
+      }
+    }
+  }, [addTurn, profileId, storageKey]);
+
+  useEffect(() => {
+    if (!codexAvailable) return;
+    const timer = setTimeout(() => {
+      const job = readPendingQuestion(storageKey);
+      if (job) void run(job);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      active.current?.abort();
+    };
+  }, [codexAvailable, run, storageKey]);
+
+  function send(value: string) {
+    const message = value.trim();
+    if (!message || active.current || resumeJob) return;
+    setError("");
+    if (!codexAvailable) {
+      addTurn(message, guidance(message, saved));
+      return;
+    }
+    const job = { id: crypto.randomUUID(), message };
+    rememberPendingQuestion(storageKey, job);
+    void run(job);
   }
 
   return <div className="mk-assistant-chat">
     <div className="mk-assistant-intro">
-      <ColoroMotion key={turns.at(-1)?.id ?? "idle"} state={turns.length ? "creative" : "idle"} compact />
-      <p>Gợi ý theo quy tắc trong ứng dụng. Chat không gửi dữ liệu ra ngoài.</p>
+      <ColoroMotion key={turns.at(-1)?.id ?? "idle"} state={pending ? "thinking" : error ? "error" : turns.length ? "creative" : "idle"} compact />
+      <p>{codexAvailable ? "Hỏi trực tiếp chat ColorME Marketing trong Codex." : "Gợi ý theo quy tắc trong ứng dụng. Cầu nối Codex chưa bật cho tài khoản này."}</p>
     </div>
     <div ref={log} className="mk-assistant-log" role="log" aria-label="Hội thoại Studio" aria-live="polite">
       {turns.map((turn) => <div key={turn.id} className="mk-assistant-turn">
@@ -92,14 +212,17 @@ function StudioChat({ saved }: { saved: boolean }) {
         <p><strong>Coloro</strong>{turn.answer}</p>
       </div>)}
     </div>
+    {pending && <p role="status">{pending}</p>}
+    {error && <p className="mk-error" role="alert">{error}</p>}
+    {resumeJob && !pending && <button type="button" onClick={() => void run(resumeJob)}>Tiếp tục chờ phản hồi</button>}
     <div className="mk-assistant-prompts" aria-label="Chủ đề gợi ý">
-      {prompts.map((prompt) => <button type="button" key={prompt.label} onClick={() => send(prompt.question)}>{prompt.label}</button>)}
+      {prompts.map((prompt) => <button type="button" key={prompt.label} disabled={Boolean(pending || resumeJob)} onClick={() => send(prompt.question)}>{prompt.label}</button>)}
     </div>
     <form className="mk-assistant-form" onSubmit={(event) => { event.preventDefault(); send(question); }}>
       <label>Hỏi trợ lý Studio
-        <textarea rows={2} maxLength={400} value={question} onChange={(event) => setQuestion(event.currentTarget.value)} />
+        <textarea rows={2} maxLength={1200} disabled={Boolean(pending || resumeJob)} value={question} onChange={(event) => setQuestion(event.currentTarget.value)} />
       </label>
-      <button type="submit" className="mk-primary" disabled={!question.trim()}>Gửi câu hỏi</button>
+      <button type="submit" className="mk-primary" disabled={Boolean(pending || resumeJob) || !question.trim()}>Gửi câu hỏi</button>
     </form>
   </div>;
 }

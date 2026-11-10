@@ -14,6 +14,7 @@ Dùng một dự án Supabase staging riêng và một deployment preview giới
 8. `20261108000100_marketing_task_links.sql`
 9. `20261108000200_marketing_calendar_thumbnails.sql`
 10. `20261109000100_marketing_notifications.sql`
+11. `20261110000100_marketing_codex_bridge.sql`
 
 Sao lưu trước khi áp dụng. Ghi mã phiên bản ứng dụng, migration đã áp dụng và cách truy cập bản sao lưu. Kiểm tra `marketing-originals` và `marketing-footage` là bucket riêng tư, quyền SELECT/INSERT khớp với chính sách Marketing và các chính sách Storage có sẵn. Dùng tài khoản thật của staging để thử upload, tải private và phát/seek media qua URL ký 60 giây. Kiểm tra quyền khi nguồn bị thu hồi, link đã phát hành hết hạn, file sai MIME và người ngoài team.
 

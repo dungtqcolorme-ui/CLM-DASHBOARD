@@ -49,6 +49,7 @@ export type MarketingCapability = { status: "not_connected" | "not_configured"; 
 export type MarketingWorkspace = {
   profile: AuthProfile; teams: MarketingTeam[]; memberships: MarketingMembership[];
   campaigns: MarketingCampaign[]; contentItems: MarketingContent[]; revisions: MarketingRevision[];
+  studioCodexAvailable?: boolean;
   capabilities: Record<"meta" | "drive" | "agent" | "render", MarketingCapability>;
 };
 export type CampaignInput = Pick<MarketingCampaign, "team_id" | "name" | "kind" | "objective" | "audience" | "message" | "start_date" | "end_date">;

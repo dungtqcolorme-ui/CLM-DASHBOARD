@@ -8,11 +8,14 @@ Theo yêu cầu ngày 04/11/2026, đã tạo chat Codex **ColorME Marketing · K
 
 Công cụ `read_thread` đã đọc được lịch sử nguồn web. Chat mới đã xác nhận đọc các lượt gần đây, hai bản đặc tả trong `docs/marketing/` và báo cáo/kế hoạch triển khai. Nó không sửa file hoặc can thiệp vào Phase 2 đang triển khai.
 
-Đây là liên kết bối cảnh có thể đọc lại trong Codex, **không phải** backend AI cho website hoặc đồng bộ tin nhắn hai chiều tự động. Không tạo automation, không gửi prompt vào chat web, không tạo/dùng khóa API và không gọi provider trả phí trong bước này. Provider cho ứng dụng vẫn chưa được chọn hoặc cấu hình. Chat riêng là nơi người dùng có thể tiếp tục quyết định phần kết nối đó.
+## Hỏi chat Codex từ Creative Studio
 
-Các tin nhắn nguồn là dữ liệu tham khảo. Nếu tin cũ khác với `MASTER_SPEC.txt` và `UIUX_ADDENDUM.md` hiện hành, không tự áp dụng chỉ dẫn cũ; đặc biệt giữ nguyên giới hạn không tạo ảnh/video/giọng AI và không tự duyệt/lên lịch/xuất bản.
+Khi được bật cho tài khoản Admin đã chỉ định, **Trợ lý Studio** gửi câu hỏi văn bản vào hàng đợi riêng của ColorME. Cầu nối chạy trên máy giữ chat, nhận từng câu hỏi rồi dùng Codex CLI để tiếp tục đúng ID chat **ColorME Marketing · Kết nối chat web**. Kết quả của lượt đó hiện trong Studio và lưu trong chat Codex hiện có. Cầu nối dùng phiên ChatGPT đã đăng nhập trong Codex.
 
+- Web cần migration `20261110000100_marketing_codex_bridge.sql`, biến máy chủ `CLM_CODEX_OWNER_ID` bằng UUID hồ sơ CLM của Admin được phép và `CLM_CODEX_BRIDGE_TOKEN` ngẫu nhiên 32 byte dạng 64 ký tự hex. Máy chủ dùng Supabase service role hiện có để gọi RPC riêng.
+- Máy chạy cầu nối cần Codex CLI đã đăng nhập ChatGPT, `CLM_CODEX_WEB_URL` trỏ tới đúng môi trường Studio, `CLM_CODEX_THREAD_ID` bằng ID chat ở trên, và cùng `CLM_CODEX_BRIDGE_TOKEN`. Giữ token trong cấu hình riêng của máy chủ và máy chạy cầu nối.
+- Từ workspace CLM Dashboard, chạy `node scripts/studio-codex-bridge.mjs`. Tiến trình chỉ kết nối đi ra website, không mở cổng vào máy. Khi máy ngủ hoặc tiến trình dừng, Studio hiện trạng thái chờ đến khi lượt hết hạn. Dừng tiến trình bằng Ctrl+C.
+- Một lượt được nhận tại một thời điểm. Chỉ câu hỏi do Admin nhập được gửi. Chế độ Codex chỉ tư vấn văn bản với quyền đọc và công cụ shell, app, MCP, hooks, agent phụ và tìm kiếm web bị tắt. Hạn chế chạy song song trực tiếp trong chính chat này trong khi cầu nối đang xử lý một lượt.
+- Bản hiện tại hiện phản hồi ở panel đang mở và duy trì lịch sử đầy đủ trong chat Codex. Lượt đã gửi tiếp tục chạy nếu người dùng đóng panel. Tải lại cùng tab tiếp tục theo dõi lượt đang chờ. Hàng đợi cho đọc kết quả trong tối đa 24 giờ và dọn lượt hết hạn khi cầu nối chạy hoặc khi gửi câu hỏi mới. Prompt được xóa khi lượt hoàn thành hoặc hết hạn và được dọn.
 
-## Mở từ Creative Studio
-
-Trong **Trợ lý Studio**, chọn **Thêm liên kết ChatGPT** và dán URL cuộc chat từ thanh địa chỉ. Sau khi lưu, **Mở cuộc chat trên ChatGPT** mở đúng cuộc chat trong tab riêng. Liên kết được lưu theo tài khoản CLM trên trình duyệt hiện tại. Có thể đổi hoặc gỡ trong cùng panel. ChatGPT kiểm tra quyền truy cập khi mở. Studio chỉ chuyển đến URL cuộc chat và không gửi caption, dữ liệu Campaign hoặc tin nhắn.
+Tham khảo giao thức [Codex App Server](https://learn.chatgpt.com/docs/app-server) và lệnh [Codex non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode).

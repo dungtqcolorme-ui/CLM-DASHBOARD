@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { databaseError } from "@/lib/marketing/server";
 
-const schemaVersion = "20261109000100";
+const schemaVersion = "20261110000100";
 const missingSchema = new Set(["42P01", "42883", "PGRST202", "PGRST205"]);
 
 type Environment = Record<string, string | undefined>;

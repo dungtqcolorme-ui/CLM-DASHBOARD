@@ -56,6 +56,7 @@ await db.exec(await readFile('supabase/migrations/20261106000200_marketing_kpi_r
 await db.exec(await readFile('supabase/migrations/20261108000100_marketing_task_links.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261108000200_marketing_calendar_thumbnails.sql','utf8'));
 await db.exec(await readFile('supabase/migrations/20261109000100_marketing_notifications.sql','utf8'));
+await db.exec(await readFile('supabase/migrations/20261110000100_marketing_codex_bridge.sql','utf8'));
 const actors=['Admin','PR Representative','PR Leader','Viewer'].map((role,i)=>({id:`${i+1}1111111-1111-4111-8111-111111111111`,email:`qa-${i}@example.test`,fullName:`Kiểm thử ${role}`,status:'active',roles:[role],createdAt:'2026-11-04T00:00:00Z',updatedAt:'2026-11-04T00:00:00Z'}));
 for(const actor of actors){await db.query('insert into profiles values($1,$2,$3,$4)',[actor.id,actor.email,actor.status,actor.fullName]);await db.query('insert into user_roles values($1,$2)',[actor.id,actor.roles[0]]);}
 const expiresAt=Math.floor(Date.now()/1000)+86400;
@@ -72,8 +73,22 @@ function clientFor(actor){return {
  storage:{from(bucket){assert.ok(['marketing-originals','marketing-footage'].includes(bucket));return {async upload(path,bytes,options){assert.equal(options.upsert,false);try{await asActor(actor,'insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3::jsonb)',[bucket,path,JSON.stringify({size:bytes.length,mimetype:options.contentType})]);storedBytes.set(path,Buffer.from(bytes));return {data:{path},error:null};}catch(error){return {data:null,error};}},async createSignedUrl(path,ttl){assert.equal(ttl,60);assert.equal(bucket,'marketing-footage');try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);if(!rows.rows.length||!storedBytes.has(path))throw Error('Private footage unavailable');const token=randomUUID();signedFootage.set(token,{actor,path,expires:Date.now()+ttl*1000});return {data:{signedUrl:base+'/qa-footage/'+token},error:null};}catch(error){return {data:null,error};}},async download(path){try{const rows=await asActor(actor,'select name from storage.objects where bucket_id=$1 and name=$2',[bucket,path]);const bytes=rows.rows.length?storedBytes.get(path):null;if(!bytes)throw new Error('Private object unavailable');return {data:new Blob([bytes]),error:null};}catch(error){return {data:null,error};}}};}},
  async rpc(name,args){if(name==='marketing_mark_notification_read'){try{const result=await asActor(actor,'select public.marketing_mark_notification_read($1::uuid) as value',[args.p_id]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}if(['marketing_readiness_probe','marketing_reserve_report_export','marketing_reserve_calendar_thumbnail'].includes(name)){try{const result=await asActor(actor,`select public.${name}() as value`);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}assert.ok(['marketing_command','marketing_task_command','marketing_campaign_kpi_command','marketing_knowledge_command','marketing_creative_command','marketing_publishing_command','marketing_video_command','marketing_report_command'].includes(name));try{const result=await asActor(actor,`select public.${name}($1::jsonb) as value`,[JSON.stringify(args.p_command)]);return {data:result.rows[0].value,error:null};}catch(error){return {data:null,error};}}
 };}
-const load=routeLoader({'@/lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'marketing_publishing_gateway_command');try{return {data:await serviceCommand(args.p_command),error:null};}catch(error){return {data:null,error};}}})},'@/lib/dashboardSession':{dashboardSupabaseUrl:()=>process.env.NEXT_PUBLIC_SUPABASE_URL,getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
+const load=routeLoader({'@/lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(name,args)=>{
+ if(name==='marketing_codex_job'){
+  try{
+   const data=await db.transaction(async tx=>{
+    await tx.exec('set local role service_role');
+    const r=await tx.query('select public.marketing_codex_job($1,$2,$3,$4,$5,$6) as value',
+      [args.p_action,args.p_owner,args.p_id??null,args.p_prompt??null,args.p_lease??null,args.p_answer??null]);
+    return r.rows[0].value;
+   });
+   return {data,error:null};
+  }catch(error){return {data:null,error};}
+ }
+ assert.equal(name,'marketing_publishing_gateway_command');try{return {data:await serviceCommand(args.p_command),error:null};}catch(error){return {data:null,error};}}})},'@/lib/dashboardSession':{dashboardSupabaseUrl:()=>process.env.NEXT_PUBLIC_SUPABASE_URL,getDashboardRequestIdentity:async request=>{const actor=tokens.get(request.headers.get('authorization')?.replace(/^Bearer /,''));if(!actor)throw Object.assign(new Error('Fixture identity missing'),{status:401});return {profile:actor,client:clientFor(actor)};}}});
 const api=load('app/api/marketing/route.ts');
+const studioCodexApi=load('app/api/marketing/studio-codex/route.ts');
+const studioCodexBridge=load('app/api/marketing/studio-codex/bridge/route.ts');
 const knowledgeApi=load('app/api/marketing/knowledge/route.ts');
 const publishingApi=load('app/api/marketing/publishing/route.ts');
 const creativeApis=Object.fromEntries(['creative','creative/upload','creative/file'].map(name=>['/api/marketing/'+name,load('app/api/marketing/'+name+'/route.ts')]));
@@ -153,6 +168,10 @@ async function context(actor,viewport={width:1440,height:1000}){
    const range=req.headers().range?.match(/^bytes=(\d+)-(\d*)$/),start=range?Number(range[1]):0,end=range&&range[2]?Math.min(Number(range[2]),bytes.length-1):bytes.length-1;
    return route.fulfill({status:range?206:200,headers:{'Content-Type':rows.rows[0].metadata.mimetype,'Accept-Ranges':'bytes','Cache-Control':'no-store',...(range?{'Content-Range':`bytes ${start}-${end}/${bytes.length}`}:{})},body:bytes.subarray(start,end+1)});
   }
+  if(url.pathname==='/api/marketing/studio-codex'){
+   const response=await studioCodexApi[req.method()](new Request(req.url(),{method:req.method(),headers:req.headers(),...(req.method()==='POST'?{body:req.postDataBuffer()}: {})}));
+   return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
+  }
   if(url.pathname==='/api/marketing'||url.pathname==='/api/marketing/knowledge'||url.pathname==='/api/marketing/publishing'||creativeApis[url.pathname]||phase5Apis[url.pathname]){
    if(req.method()==='POST'&&!url.pathname.endsWith('/upload'))report.commands.push(JSON.parse(req.postData()||'{}').action);
    if(req.method()==='POST'&&planGate&&JSON.parse(req.postData()||'{}').action==='update_plan'){const gate=planGate;planGate=null;gate.started.resolve();await gate.release.promise;}
@@ -228,7 +247,7 @@ try{
  checkpoint('Phase2 knowledge, research, ideas and DNA');
  await testKnowledgeWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/knowledge'),report});
  checkpoint('Phase3 Creative workflow');
- await testCreativeWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/creative'),mainCommand:(page,actor,command)=>cmd(page,actor,command),report});
+ await testCreativeWorkflow({page:p,db,base,actors,team,campaign,shot,studioCodexApi,studioCodexBridge,tokenFor,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/creative'),mainCommand:(page,actor,command)=>cmd(page,actor,command),report});
  checkpoint('Phase4 Publishing workflow');
  await testPublishingWorkflow({page:p,db,base,actors,team,campaign,shot,command:(page,actor,command)=>cmd(page,actor,command,'/api/marketing/publishing'),mainCommand:(page,actor,command)=>cmd(page,actor,command),serviceCommand,context,report});lastPage=p;
  }

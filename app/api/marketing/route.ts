@@ -2,6 +2,8 @@ import { getDashboardRequestIdentity } from "@/lib/dashboardSession";
 import { MarketingError, parseMarketingCommand } from "@/lib/marketing/domain";
 import { databaseError, MARKETING_CAPABILITIES, marketingErrorResponse, marketingResponse, readBoundedJson, readMarketingRows } from "@/lib/marketing/server";
 
+import { codexBridgeConfig } from "@/lib/marketing/codex-bridge";
+
 export async function GET(request: Request) {
   try {
     const { client, profile } = await getDashboardRequestIdentity(request);
@@ -12,7 +14,7 @@ export async function GET(request: Request) {
       readMarketingRows(client, "marketing_content_items", "*", 2000),
       readMarketingRows(client, "marketing_revisions", "id,team_id,campaign_id,entity_type,entity_id,version,action,actor_id,snapshot,created_at", 5000),
     ]);
-    return marketingResponse({ profile, teams, memberships, campaigns, contentItems, revisions, capabilities: MARKETING_CAPABILITIES });
+    return marketingResponse({ profile, teams, memberships, campaigns, contentItems, revisions, capabilities: MARKETING_CAPABILITIES, studioCodexAvailable: profile.roles.includes("Admin") && codexBridgeConfig()?.owner === profile.id });
   } catch (error) { return marketingErrorResponse(error); }
 }
 

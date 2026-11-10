@@ -123,8 +123,7 @@ body:has(#clm-marketing-content:not([hidden])) #app-loading-v3 { display: none !
 .mk-assistant-prompts { display: flex; flex-wrap: wrap; gap: var(--cos-space-1); }
 .mk-root .mk-assistant-prompts button { padding-inline: var(--cos-space-2); font-size: var(--cos-type-small); }
 .mk-assistant-form label { display: grid; gap: var(--cos-space-1); font-size: var(--cos-type-small); font-weight: 600; }
-.mk-assistant-web-chat { margin-block-end: var(--cos-space-3); }
-.mk-assistant-web-chat summary { cursor: pointer; padding-block: var(--cos-space-2); }
+.mk-assistant-turn p { white-space: pre-wrap; }
 .mk-assistant-evidence { margin-block-start: var(--cos-space-3); }
 .mk-assistant-evidence summary { cursor: pointer; padding-block: var(--cos-space-2); }
 

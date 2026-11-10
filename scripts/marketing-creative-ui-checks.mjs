@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,readFile} from 'node:fs/promises';
 import path from 'node:path';
 /** Uses only the caller's disposable database and intercepted API/Storage. */
-export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,command,mainCommand,report}) {
+export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,studioCodexApi,studioCodexBridge,tokenFor,command,mainCommand,report}) {
  const content=await mainCommand(p,actors[0],{action:'create_content',campaign_id:campaign.id,title:'Creative QA thủ công',caption:'Caption thủ công kiểm thử.',content_line:'Sharing',assignee_id:null,production_status:'not_started',production_due_at:null,review_due_at:null,proposed_publish_at:null});
  await p.goto(base+`/marketing/assets?campaign=${campaign.id}`);
  const png=await p.evaluate(()=>{const c=document.createElement('canvas');c.width=1080;c.height=1080;const x=c.getContext('2d');x.fillStyle='#136943';x.fillRect(0,0,1080,1080);return c.toDataURL('image/png').split(',')[1];});
@@ -103,31 +103,50 @@ export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,
  await p.setViewportSize({width:390,height:844});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await shot(p,'phase3-workbench-mobile');await p.setViewportSize({width:1440,height:1000});
  report.checks.push('Phase3 actual upload/review, editable two-page canvas, PNG downloads, campaign template, dirty caption preservation/conflict and revocation export gate; Storage fixture only');
 
- const chatSettings=p.getByRole('complementary',{name:'Trợ lý Creative Studio'});
- const webChat=chatSettings.getByRole('link',{name:'Mở cuộc chat trên ChatGPT',exact:true});
- await chatSettings.getByText('Thêm liên kết ChatGPT',{exact:true}).click();
- const url=chatSettings.getByLabel('Liên kết cuộc chat ChatGPT',{exact:true});
- const saveLink=chatSettings.getByRole('button',{name:'Lưu liên kết ChatGPT',exact:true});
- const conversationPath='/c/12345678-90ab-cdef-1234-567890abcdef';
- await url.fill('https://chatgpt.com.invalid'+conversationPath);
- await saveLink.click();
- assert.match(await chatSettings.getByRole('alert').innerText(),/Dùng địa chỉ/);
- assert.equal(await webChat.count(),0);
- const destination='https://chatgpt.com'+conversationPath;
- await url.fill(destination+'?ref=qa#test');
- await saveLink.click();
- await webChat.waitFor();
- assert.equal(await webChat.getAttribute('href'),destination);
- assert.equal(await webChat.getAttribute('target'),'_blank');
- assert.equal(await webChat.getAttribute('rel'),'noopener noreferrer');
- await p.reload();
- await webChat.waitFor();
- assert.equal(await webChat.getAttribute('href'),destination);
- await chatSettings.getByText('Đổi liên kết ChatGPT',{exact:true}).click();
- await chatSettings.getByRole('button',{name:'Gỡ liên kết ChatGPT',exact:true}).click();
- await webChat.waitFor({state:'detached'});
- await p.reload();
- await chatSettings.getByText('Thêm liên kết ChatGPT',{exact:true}).waitFor();
- assert.equal(await webChat.count(),0);
- report.checks.push('Studio web chat validates official conversation URLs, stores the preference across reload, opens in a separate tab without referrer, and can clear the saved link');
+
+ const previousOwner=process.env.CLM_CODEX_OWNER_ID;
+ const previousBridge=process.env.CLM_CODEX_BRIDGE_TOKEN;
+ const bridgeToken='a'.repeat(64);
+ process.env.CLM_CODEX_OWNER_ID=actors[0].id;
+ process.env.CLM_CODEX_BRIDGE_TOKEN=bridgeToken;
+ const bridge=async (body,token=bridgeToken)=>studioCodexBridge.POST(new Request(base+'/api/marketing/studio-codex/bridge',{
+  method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),
+ }));
+ const userRequest=(actor,body)=>new Request(base+'/api/marketing/studio-codex',{
+  method:'POST',headers:{Authorization:'Bearer '+tokenFor(actor),'Content-Type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),...body}),
+ });
+ try {
+  const panel=p.getByRole('complementary',{name:'Trợ lý Creative Studio'});
+  await p.reload();
+  await panel.getByText('Hỏi trực tiếp chat ColorME Marketing trong Codex.',{exact:true}).waitFor();
+  const question='Câu hỏi minh họa qua cầu nối Studio.';
+  assert.equal((await studioCodexApi.POST(userRequest(actors[1],{message:question}))).status,403);
+  assert.equal((await bridge({action:'claim'},'b'.repeat(64))).status,401);
+  const submitted=p.waitForResponse(r=>r.url().endsWith('/api/marketing/studio-codex')&&r.request().method()==='POST');
+  await panel.getByRole('textbox',{name:'Hỏi trợ lý Studio'}).fill(question);
+  await panel.getByRole('button',{name:'Gửi câu hỏi',exact:true}).click();
+  const response=await submitted;
+  assert.equal(response.status(),202);
+  const {id}=await response.json();
+  assert.equal((await studioCodexApi.POST(userRequest(actors[0],{message:'Một câu hỏi đồng thời'}))).status,409);
+  const claimed=await bridge({action:'claim'});
+  assert.equal(claimed.status,200);
+  const job=await claimed.json();
+  assert.equal(job.id,id);
+  assert.equal(job.prompt,question);
+  assert.equal(await (await bridge({action:'claim'})).json(),null);
+  const resumed=p.waitForResponse(r=>r.url().endsWith('/api/marketing/studio-codex')&&r.request().method()==='POST');
+  await p.reload();
+  assert.deepEqual(await (await resumed).json(),{id,state:'running'});
+  assert.equal(await (await bridge({action:'claim'})).json(),null);
+  assert.deepEqual(await (await bridge({action:'complete',id,lease:'11111111-1111-4111-8111-111111111111',answer:'Sai'})).json(),{accepted:false});
+  assert.deepEqual(await (await bridge({action:'complete',id,lease:job.lease,answer:'Phản hồi Codex minh họa'})).json(),{accepted:true});
+  await panel.getByRole('log').getByText(/Phản hồi Codex minh họa/).waitFor();
+  await shot(p,'studio-codex-bridge');
+  assert.equal((await db.query('select prompt from marketing_private.codex_jobs where id=$1',[id])).rows[0].prompt,null);
+  report.checks.push('Studio web submit through real authenticated API and SQL mailbox, private single claim, same job on reload, invalid lease rejection, reply shown in panel and prompt erased after completion');
+ } finally {
+  if(previousOwner===undefined)delete process.env.CLM_CODEX_OWNER_ID;else process.env.CLM_CODEX_OWNER_ID=previousOwner;
+  if(previousBridge===undefined)delete process.env.CLM_CODEX_BRIDGE_TOKEN;else process.env.CLM_CODEX_BRIDGE_TOKEN=previousBridge;
+ }
 }
