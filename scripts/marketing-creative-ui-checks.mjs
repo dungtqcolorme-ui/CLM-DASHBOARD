@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,readFile} from 'node:fs/promises';
 import path from 'node:path';
 /** Uses only the caller's disposable database and intercepted API/Storage. */
-export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,studioCodexApi,studioCodexBridge,tokenFor,command,mainCommand,report}) {
+export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,studioCodexApi,tokenFor,command,mainCommand,report}) {
  const content=await mainCommand(p,actors[0],{action:'create_content',campaign_id:campaign.id,title:'Creative QA thủ công',caption:'Caption thủ công kiểm thử.',content_line:'Sharing',assignee_id:null,production_status:'not_started',production_due_at:null,review_due_at:null,proposed_publish_at:null});
  await p.goto(base+`/marketing/assets?campaign=${campaign.id}`);
  const png=await p.evaluate(()=>{const c=document.createElement('canvas');c.width=1080;c.height=1080;const x=c.getContext('2d');x.fillStyle='#136943';x.fillRect(0,0,1080,1080);return c.toDataURL('image/png').split(',')[1];});
@@ -104,24 +104,26 @@ export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,
  report.checks.push('Phase3 actual upload/review, editable two-page canvas, PNG downloads, campaign template, dirty caption preservation/conflict and revocation export gate; Storage fixture only');
 
 
- const previousOwner=process.env.CLM_CODEX_OWNER_ID;
- const previousBridge=process.env.CLM_CODEX_BRIDGE_TOKEN;
  const bridgeToken='a'.repeat(64);
- process.env.CLM_CODEX_OWNER_ID=actors[0].id;
- process.env.CLM_CODEX_BRIDGE_TOKEN=bridgeToken;
- const bridge=async (body,token=bridgeToken)=>studioCodexBridge.POST(new Request(base+'/api/marketing/studio-codex/bridge',{
-  method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),
- }));
+ const threadId='12345678-1234-4234-8234-123456789abc';
+ await db.query("insert into marketing_private.codex_relay(thread_id,token_digest) values($1,sha256(convert_to($2,'UTF8')))",[threadId,bridgeToken]);
+ const relay=async (action,{token=bridgeToken,thread=threadId,id=null,lease=null,answer=null}={})=>
+  db.transaction(async tx=>{
+   await tx.exec('set local role anon');
+   const response=await tx.query('select public.marketing_codex_relay_job($1,$2,$3,$4,$5,$6) as value',
+    [action,token,thread,id,lease,answer]);
+   return response.rows[0].value;
+  });
  const userRequest=(actor,body)=>new Request(base+'/api/marketing/studio-codex',{
   method:'POST',headers:{Authorization:'Bearer '+tokenFor(actor),'Content-Type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),...body}),
  });
  try {
   const panel=p.getByRole('complementary',{name:'Trợ lý Creative Studio'});
   await p.reload();
-  await panel.getByText('Hỏi trực tiếp chat ColorME Marketing trong Codex.',{exact:true}).waitFor();
+  await panel.getByText(/Hỏi trực tiếp chat ColorME Marketing trong Codex/).waitFor();
   const question='Câu hỏi minh họa qua cầu nối Studio.';
-  assert.equal((await studioCodexApi.POST(userRequest(actors[1],{message:question}))).status,403);
-  assert.equal((await bridge({action:'claim'},'b'.repeat(64))).status,401);
+  await assert.rejects(relay('claim',{token:'b'.repeat(64)}),{code:'42501'});
+  await assert.rejects(relay('claim',{thread:crypto.randomUUID()}),{code:'42501'});
   const submitted=p.waitForResponse(r=>r.url().endsWith('/api/marketing/studio-codex')&&r.request().method()==='POST');
   await panel.getByRole('textbox',{name:'Hỏi trợ lý Studio'}).fill(question);
   await panel.getByRole('button',{name:'Gửi câu hỏi',exact:true}).click();
@@ -129,24 +131,32 @@ export async function testCreativeWorkflow({page:p,db,base,actors,campaign,shot,
   assert.equal(response.status(),202);
   const {id}=await response.json();
   assert.equal((await studioCodexApi.POST(userRequest(actors[0],{message:'Một câu hỏi đồng thời'}))).status,409);
-  const claimed=await bridge({action:'claim'});
-  assert.equal(claimed.status,200);
-  const job=await claimed.json();
+  const viewer=await studioCodexApi.POST(userRequest(actors[3],{message:'Câu hỏi riêng của Viewer.'}));
+  assert.equal(viewer.status,202);
+  const viewerId=(await viewer.json()).id;
+  const job=await relay('claim');
   assert.equal(job.id,id);
+  assert.equal(job.threadId,threadId);
   assert.equal(job.prompt,question);
-  assert.equal(await (await bridge({action:'claim'})).json(),null);
+  assert.equal(await relay('claim'),null);
   const resumed=p.waitForResponse(r=>r.url().endsWith('/api/marketing/studio-codex')&&r.request().method()==='POST');
   await p.reload();
   assert.deepEqual(await (await resumed).json(),{id,state:'running'});
-  assert.equal(await (await bridge({action:'claim'})).json(),null);
-  assert.deepEqual(await (await bridge({action:'complete',id,lease:'11111111-1111-4111-8111-111111111111',answer:'Sai'})).json(),{accepted:false});
-  assert.deepEqual(await (await bridge({action:'complete',id,lease:job.lease,answer:'Phản hồi Codex minh họa'})).json(),{accepted:true});
+  assert.equal(await relay('claim'),null);
+  assert.deepEqual(await relay('complete',{id,lease:crypto.randomUUID(),answer:'Sai'}),{accepted:false});
+  assert.deepEqual(await relay('complete',{id,lease:job.lease,answer:'Phản hồi Codex minh họa'}),{accepted:true});
+  const statusFor=(actor,id)=>studioCodexApi.GET(new Request(base+'/api/marketing/studio-codex?id='+id,{headers:{Authorization:'Bearer '+tokenFor(actor)}}));
+  assert.equal((await statusFor(actors[3],id)).status,404);
+  assert.equal((await statusFor(actors[0],viewerId)).status,404);
+  const viewerJob=await relay('claim');
+  assert.equal(viewerJob.id,viewerId);
+  assert.deepEqual(await relay('complete',{id:viewerId,lease:viewerJob.lease,answer:'Phản hồi riêng của Viewer.'}),{accepted:true});
+  assert.equal((await (await statusFor(actors[3],viewerId)).json()).answer,'Phản hồi riêng của Viewer.');
   await panel.getByRole('log').getByText(/Phản hồi Codex minh họa/).waitFor();
   await shot(p,'studio-codex-bridge');
   assert.equal((await db.query('select prompt from marketing_private.codex_jobs where id=$1',[id])).rows[0].prompt,null);
-  report.checks.push('Studio web submit through real authenticated API and SQL mailbox, private single claim, same job on reload, invalid lease rejection, reply shown in panel and prompt erased after completion');
+  report.checks.push('Studio shared pinned Codex thread accepts Admin and Viewer, processes FIFO one at a time, rejects wrong token and thread, isolates replies, preserves job on reload and erases processed prompt');
  } finally {
-  if(previousOwner===undefined)delete process.env.CLM_CODEX_OWNER_ID;else process.env.CLM_CODEX_OWNER_ID=previousOwner;
-  if(previousBridge===undefined)delete process.env.CLM_CODEX_BRIDGE_TOKEN;else process.env.CLM_CODEX_BRIDGE_TOKEN=previousBridge;
+  await db.exec('delete from marketing_private.codex_relay');
  }
 }

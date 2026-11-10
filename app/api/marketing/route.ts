@@ -2,19 +2,20 @@ import { getDashboardRequestIdentity } from "@/lib/dashboardSession";
 import { MarketingError, parseMarketingCommand } from "@/lib/marketing/domain";
 import { databaseError, MARKETING_CAPABILITIES, marketingErrorResponse, marketingResponse, readBoundedJson, readMarketingRows } from "@/lib/marketing/server";
 
-import { codexBridgeConfig } from "@/lib/marketing/codex-bridge";
+import { codexJob } from "@/lib/marketing/codex-bridge";
 
 export async function GET(request: Request) {
   try {
     const { client, profile } = await getDashboardRequestIdentity(request);
-    const [teams, memberships, campaigns, contentItems, revisions] = await Promise.all([
+    const [teams, memberships, campaigns, contentItems, revisions, studioCodex] = await Promise.all([
       readMarketingRows(client, "marketing_teams", "id,name,creator_id,created_at", 100),
       readMarketingRows(client, "marketing_team_memberships", "team_id,user_id,created_at", 1000),
       readMarketingRows(client, "marketing_campaigns", "*", 500),
       readMarketingRows(client, "marketing_content_items", "*", 2000),
       readMarketingRows(client, "marketing_revisions", "id,team_id,campaign_id,entity_type,entity_id,version,action,actor_id,snapshot,created_at", 5000),
+      codexJob(client, "availability").catch(() => null),
     ]);
-    return marketingResponse({ profile, teams, memberships, campaigns, contentItems, revisions, capabilities: MARKETING_CAPABILITIES, studioCodexAvailable: profile.roles.includes("Admin") && codexBridgeConfig()?.owner === profile.id });
+    return marketingResponse({ profile, teams, memberships, campaigns, contentItems, revisions, capabilities: MARKETING_CAPABILITIES, studioCodexAvailable: studioCodex?.available === true });
   } catch (error) { return marketingErrorResponse(error); }
 }
 

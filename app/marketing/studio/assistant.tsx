@@ -140,7 +140,7 @@ function StudioChat({ saved, profileId, codexAvailable }: {
         throw new Error(receipt?.error || "Chưa xác nhận được câu hỏi đã gửi.");
       }
 
-      for (let attempt = 0; attempt < 150 && !signal.aborted; attempt += 1) {
+      for (let attempt = 0; attempt < 330 && !signal.aborted; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         if (signal.aborted) return;
         const response = await fetch(`${url}?id=${encodeURIComponent(job.id)}`, {
@@ -204,7 +204,7 @@ function StudioChat({ saved, profileId, codexAvailable }: {
   return <div className="mk-assistant-chat">
     <div className="mk-assistant-intro">
       <ColoroMotion key={turns.at(-1)?.id ?? "idle"} state={pending ? "thinking" : error ? "error" : turns.length ? "creative" : "idle"} compact />
-      <p>{codexAvailable ? "Hỏi trực tiếp chat ColorME Marketing trong Codex." : "Gợi ý theo quy tắc trong ứng dụng. Cầu nối Codex chưa bật cho tài khoản này."}</p>
+      <p>{codexAvailable ? "Hỏi trực tiếp chat ColorME Marketing trong Codex. Chat dùng chung ngữ cảnh Marketing." : "Gợi ý theo quy tắc trong ứng dụng. Cầu nối Codex chưa bật cho tài khoản này."}</p>
     </div>
     <div ref={log} className="mk-assistant-log" role="log" aria-label="Hội thoại Studio" aria-live="polite">
       {turns.map((turn) => <div key={turn.id} className="mk-assistant-turn">

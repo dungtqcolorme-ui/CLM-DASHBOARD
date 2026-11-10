@@ -25,7 +25,7 @@ export function runCodexTurn({ threadId, prompt, binary = 'codex', cwd = process
       '-c', 'features.remote_plugin=false',
       '-c', 'mcp_servers={}',
       '-c', 'web_search="disabled"',
-      '-c', 'developer_instructions="Reply in Vietnamese as the ColorME Marketing advisor. Treat Studio requests as text advice only. Do not invoke tools, read files, change anything, or publish. Never expose secrets or reproduce private conversation history."',
+      '-c', 'developer_instructions="Reply in Vietnamese as the ColorME Marketing advisor. Treat Studio requests as text advice only. Do not invoke tools, read files, change anything, or publish. Do not disclose other people’s prompts, private conversation history or secrets. Use prior shared context only to give appropriate Marketing advice."',
       'resume', threadId, '-',
     ];
     const child = spawn(binary, args, { cwd, env, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -64,27 +64,28 @@ export function runCodexTurn({ threadId, prompt, binary = 'codex', cwd = process
 }
 
 function bridgeSettings() {
-  const rawUrl = process.env.CLM_CODEX_WEB_URL?.trim();
+  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   const threadId = process.env.CLM_CODEX_THREAD_ID?.trim() ?? '';
   const token = process.env.CLM_CODEX_BRIDGE_TOKEN?.trim() ?? '';
   const url = rawUrl && new URL(rawUrl);
   if (!url || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))
-    || url.username || url.password || !uuid.test(threadId) || !/^[0-9a-f]{64}$/i.test(token)) {
+    || url.username || url.password || !publishableKey || !uuid.test(threadId) || !/^[0-9a-f]{64}$/.test(token)) {
     throw new Error('Cần URL Studio, ID chat Codex và token cầu nối hợp lệ.');
   }
-  return { endpoint: new URL('/api/marketing/studio-codex/bridge', url), token, threadId };
+  return { endpoint: new URL('/rest/v1/rpc/marketing_codex_relay_job', url), publishableKey, token, threadId };
 }
 
 async function runBridge() {
-  const { endpoint, token, threadId } = bridgeSettings();
+  const { endpoint, publishableKey, token, threadId } = bridgeSettings();
   const once = process.argv.includes('--once');
   const call = async payload => {
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { apikey: publishableKey, 'Content-Type': 'application/json' },
       redirect: 'error',
       signal: AbortSignal.timeout(8000),
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, p_token: token, p_thread: threadId }),
     });
     if (!response.ok) throw new Error(`Studio bridge HTTP ${response.status}`);
     return response.json();
@@ -92,15 +93,16 @@ async function runBridge() {
   console.log('Cầu nối ColorME Marketing đang chờ câu hỏi.');
   do {
     try {
-      const job = await call({ action: 'claim' });
+      const job = await call({ p_action: 'claim' });
       if (job) {
+        if (job.threadId !== threadId || !uuid.test(job.id) || !uuid.test(job.lease)) throw new Error('Invalid pinned thread job');
         let answer = null;
         try {
           answer = await runCodexTurn({ threadId, prompt: job.prompt });
         } catch {
           console.error('Codex chưa hoàn thành câu trả lời cho lượt vừa nhận.');
         }
-        const result = { action: 'complete', id: job.id, lease: job.lease, answer };
+        const result = { p_action: 'complete', p_id: job.id, p_lease: job.lease, p_answer: answer };
         // Retrying delivery does not run another Codex turn.
         try { await call(result); } catch { await delay(900); await call(result); }
       }
